@@ -74,10 +74,17 @@ class OpenAiClient implements LLMClient
         $httpRequest = $this->createRequest('POST', '/chat/completions', $payload);
         $response = $this->httpClient->request($httpRequest);
 
+        // 累积完整的 tool_calls（处理 MiniMax 等平台的分片情况）
+        $accumulatedToolCalls = [];
+        $accumulatedContent = '';
+        $accumulatedThinking = '';
+        $lastModel = '';
+        $hasIncompleteToolCalls = false;
+
         // 使用 trait 的流式处理方法
         $this->processStreamByChunk(
             $response->getBody(),
-            function($line) use ($callback, $request) {
+            function($line) use ($callback, $request, &$accumulatedToolCalls, &$accumulatedContent, &$accumulatedThinking, &$lastModel, &$hasIncompleteToolCalls) {
                 $line = trim($line);
                 if ($line === '' || $line === 'data: [DONE]') {
                     return true;
@@ -86,9 +93,104 @@ class OpenAiClient implements LLMClient
                 if (str_starts_with($line, 'data: ')) {
                     $data = $this->safeJsonDecode(substr($line, 6));
                     if ($data !== null) {
-                        $response = $this->parseStreamChunk($data);
-                        $callback($response);
-                        return !$response->done;
+                        $choice = $data['choices'][0];
+                        $delta = $choice['delta'];
+                        $finishReason = $choice['finish_reason'] ?? null;
+
+                        // 累积内容
+                        if (isset($delta['content']) && $delta['content'] !== '') {
+                            $accumulatedContent .= $delta['content'];
+                        }
+
+                        // 累积思考过程
+                        if (isset($delta['thinking']) && $delta['thinking'] !== '') {
+                            $accumulatedThinking .= $delta['thinking'];
+                        }
+
+                        // 记录模型名称
+                        if (isset($data['model'])) {
+                            $lastModel = $data['model'];
+                        }
+
+                        // 处理 tool_calls
+                        if (isset($delta['tool_calls']) && is_array($delta['tool_calls'])) {
+                            $hasIncompleteToolCalls = true;
+                            foreach ($delta['tool_calls'] as $toolCall) {
+                                $index = $toolCall['index'] ?? 0;
+
+                                // 初始化这个位置的工具调用
+                                if (!isset($accumulatedToolCalls[$index])) {
+                                    $accumulatedToolCalls[$index] = [
+                                        'id' => '',
+                                        'type' => 'function',
+                                        'function' => [
+                                            'name' => '',
+                                            'arguments' => ''
+                                        ]
+                                    ];
+                                }
+
+                                // 合并字段
+                                if (isset($toolCall['id'])) {
+                                    $accumulatedToolCalls[$index]['id'] = $toolCall['id'];
+                                }
+                                if (isset($toolCall['type'])) {
+                                    $accumulatedToolCalls[$index]['type'] = $toolCall['type'];
+                                }
+                                if (isset($toolCall['function'])) {
+                                    if (isset($toolCall['function']['name'])) {
+                                        $accumulatedToolCalls[$index]['function']['name'] = $toolCall['function']['name'];
+                                    }
+                                    if (isset($toolCall['function']['arguments'])) {
+                                        $accumulatedToolCalls[$index]['function']['arguments'] .= $toolCall['function']['arguments'];
+                                    }
+                                }
+                            }
+                        }
+
+                        // 只有在完成时才触发回调
+                        $isDone = $finishReason !== null;
+                        if ($isDone) {
+                            // 验证并组装完整的 tool_calls
+                            $completeToolCalls = [];
+                            foreach ($accumulatedToolCalls as $toolCall) {
+                                if ($toolCall['function']['name'] !== '' && $toolCall['id'] !== '') {
+                                    $completeToolCalls[] = $toolCall;
+                                }
+                            }
+
+                            $response = LLMResponse::createChunk(
+                                $accumulatedContent,
+                                $accumulatedThinking,
+                                true
+                            )->model($lastModel);
+
+                            if (count($completeToolCalls) > 0) {
+                                $response->toolCalls($completeToolCalls);
+                            }
+
+                            $callback($response);
+
+                            // 清空累加的内容
+                            $accumulatedContent = '';
+                            $accumulatedThinking = '';
+                            $accumulatedToolCalls = [];
+                            $hasIncompleteToolCalls = false;
+
+                            return false;
+                        } elseif (!$hasIncompleteToolCalls && ($accumulatedContent !== '' || $accumulatedThinking !== '')) {
+                            // 如果没有工具调用，可以流式输出内容
+                            $response = LLMResponse::createChunk(
+                                $accumulatedContent,
+                                $accumulatedThinking,
+                                false
+                            )->model($lastModel);
+                            $callback($response);
+
+                            // 清空已发送的内容
+                            $accumulatedContent = '';
+                            $accumulatedThinking = '';
+                        }
                     }
                 }
                 return true;
@@ -208,13 +310,21 @@ class OpenAiClient implements LLMClient
      */
     private function parseChatResponse(array $data): LLMResponse
     {
+        $choice = $data['choices'][0];
+        $message = $choice['message'];
+
         $response = LLMResponse::create()
-            ->content($data['choices'][0]['message']['content'] ?? '')
-            ->thinking($data['choices'][0]['message']['thinking'] ?? '')
+            ->content($message['content'] ?? '')
+            ->thinking($message['thinking'] ?? '')
             ->model($data['model'] ?? '')
             ->done(true)
-            ->finishReason($data['choices'][0]['finish_reason'] ?? '')
+            ->finishReason($choice['finish_reason'] ?? '')
             ->raw($data);
+
+        // 解析工具调用
+        if (isset($message['tool_calls']) && is_array($message['tool_calls'])) {
+            $response->toolCalls($message['tool_calls']);
+        }
 
         // 解析使用情况
         if (isset($data['usage'])) {
@@ -233,10 +343,20 @@ class OpenAiClient implements LLMClient
      */
     private function parseStreamChunk(array $data): LLMResponse
     {
-        return LLMResponse::createChunk(
-            $data['choices'][0]['delta']['content'] ?? '',
-            $data['choices'][0]['delta']['thinking'] ?? '',
-            ($data['choices'][0]['finish_reason'] ?? null) !== null
+        $choice = $data['choices'][0];
+        $delta = $choice['delta'];
+
+        $chunk = LLMResponse::createChunk(
+            $delta['content'] ?? '',
+            $delta['thinking'] ?? '',
+            ($choice['finish_reason'] ?? null) !== null
         )->model($data['model'] ?? '');
+
+        // 解析流式响应中的工具调用
+        if (isset($delta['tool_calls']) && is_array($delta['tool_calls'])) {
+            $chunk->toolCalls($delta['tool_calls']);
+        }
+
+        return $chunk;
     }
 }

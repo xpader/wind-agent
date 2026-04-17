@@ -150,6 +150,12 @@ class Agent
                     'role' => 'assistant',
                     'content' => $response->content
                 ];
+
+                // 执行迭代回调（传递空的工具结果）
+                if ($onIteration !== null) {
+                    $onIteration($iteration + 1, $response, []);
+                }
+
                 break;
             }
 
@@ -159,6 +165,9 @@ class Agent
 
             // 执行工具调用
             $toolResults = $response->executeToolCalls();
+
+            // 将 assistant 消息添加到请求中（确保 MiniMax 等平台能找到对应的 tool_call_id）
+            $request->addMessage('assistant', $response->content, ['tool_calls' => $response->toolCalls]);
 
             // 添加工具消息到请求和消息历史
             foreach ($toolResults as $result) {

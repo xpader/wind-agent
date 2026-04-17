@@ -100,9 +100,17 @@ class TestAgentCommand extends Command
      */
     private function parseConfig(InputInterface $input): array
     {
+        $clientType = $input->getOption('client');
+        $host = $input->getOption('host');
+
+        // 根据客户端类型设置正确的 host
+        if ($clientType === 'minimax') {
+            $host = 'https://api.minimaxi.com/v1'; // MiniMax 地址固定
+        }
+
         return [
-            'clientType' => $input->getOption('client'),
-            'host' => $input->getOption('host'),
+            'clientType' => $clientType,
+            'host' => $host,
             'model' => $input->getOption('model'),
             'systemPrompt' => $input->getOption('prompt'),
             'userMessage' => $input->getOption('message'),
@@ -132,6 +140,21 @@ class TestAgentCommand extends Command
             );
         }
 
+        if ($type === 'minimax') {
+            // MiniMax TokenPlan 使用 OpenAI 兼容接口
+            $apiKey = env('MINIMAX_API_KEY', '');
+            if ($apiKey === '') {
+                throw new \RuntimeException('MiniMax API Key 未设置，请设置 MINIMAX_API_KEY 环境变量');
+            }
+
+            return new OpenAiClient(
+                httpClient: $httpClient,
+                apiKey: $apiKey,
+                baseUrl: $host, // 使用从配置中获取的 host
+                timeout: 60
+            );
+        }
+
         return new OllamaClient(
             httpClient: $httpClient,
             baseUrl: "http://{$host}",
@@ -144,7 +167,13 @@ class TestAgentCommand extends Command
      */
     private function displayHeader(OutputInterface $output, array $config): void
     {
-        $clientName = $config['clientType'] === 'openai' ? 'OpenAI 兼容客户端' : 'Ollama 原生客户端';
+        $clientNames = [
+            'openai' => 'OpenAI 兼容客户端',
+            'minimax' => 'MiniMax TokenPlan 客户端',
+            'ollama' => 'Ollama 原生客户端'
+        ];
+
+        $clientName = $clientNames[$config['clientType']] ?? '未知客户端';
 
         $output->writeln('');
         $output->writeln('<fg=blue;options=bold>========================================</>');
@@ -204,7 +233,7 @@ class TestAgentCommand extends Command
                             $toolArgs = json_decode($toolArgs, true) ?? [];
                         }
 
-                        $output->writeln('<fg=magenta;options=bold>========== 检测到工具调用 ==========');
+                        $output->writeln('<fg=magenta;options=bold>========== 工具调用 ==========');
                         $output->writeln("<fg=magenta>工具:</fg=magenta> {$toolName}");
                         $output->writeln("<fg=magenta>参数:</fg=magenta> " . json_encode($toolArgs, JSON_UNESCAPED_UNICODE));
                         $output->writeln('');
@@ -340,7 +369,7 @@ class TestAgentCommand extends Command
 
         // 显示最终输出
         if ($response->content !== '') {
-            $output->writeln('<fg=green;options=bold>========== 最终输出 ==========');
+            $output->writeln('<fg=green;options=bold>========== 内容输出 ==========');
             $output->writeln('');
             $output->writeln('<fg=green>' . $response->content . '</fg=green>');
             $output->writeln('');
