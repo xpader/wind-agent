@@ -1,0 +1,390 @@
+<?php
+
+namespace App\Libs\Agent;
+
+use App\Libs\LLM\LLMClient;
+use App\Libs\LLM\LLMRequest;
+use App\Libs\LLM\LLMResponse;
+use App\Libs\Agent\ToolInterface;
+
+/**
+ * Agent 类
+ *
+ * 封装 LLM 交互逻辑，提供统一的对话接口
+ * 支持系统提示词、工具调用、技能系统、消息历史管理
+ */
+class Agent
+{
+    /** 系统提示词 */
+    private string $systemPrompt;
+
+    /** 添加的工具 */
+    private array $tools;
+
+    /** 是否启用技能 */
+    private bool $withSkills;
+
+    /** 使用的模型 */
+    private string $model;
+
+    /** LLM 提供商实例 */
+    private LLMClient $provider;
+
+    /** Max Tokens */
+    private int $maxTokens;
+
+    /** 温度参数 */
+    private float $temperature;
+
+    /** 思考模式 */
+    private $think = null;
+
+    /** 消息历史 */
+    private array $messages = [];
+
+    /** Skill 管理器 */
+    private ?SkillManager $skillManager = null;
+
+    /**
+     * 构造函数
+     *
+     * @param string $systemPrompt 系统提示词
+     * @param array $tools 工具列表
+     * @param bool $withSkills 是否启用技能
+     * @param string $model 模型名称
+     * @param LLMClient $provider LLM 提供商实例
+     * @param int $maxTokens 最大 token 数
+     */
+    public function __construct(
+        string $systemPrompt = '',
+        array $tools = [],
+        bool $withSkills = false,
+        string $model = 'gpt-3.5-turbo',
+        ?LLMClient $provider = null,
+        int $maxTokens = 32768,
+        float $temperature = 0.7,
+        $think = null
+    ) {
+        $this->systemPrompt = $systemPrompt;
+        $this->tools = $tools;
+        $this->withSkills = $withSkills;
+        $this->model = $model;
+        $this->maxTokens = $maxTokens;
+        $this->temperature = $temperature;
+        $this->think = $think;
+
+        // 如果没有提供 provider，使用默认的 Ollama 客户端
+        if ($provider === null) {
+            $httpClient = \Amp\Http\Client\HttpClientBuilder::buildDefault();
+            $this->provider = new \App\Libs\LLM\Clients\OllamaClient(
+                httpClient: $httpClient,
+                baseUrl: 'http://localhost:11434',
+                timeout: 60
+            );
+        } else {
+            $this->provider = $provider;
+        }
+
+        // 初始化 Skill 管理器
+        if ($this->withSkills) {
+            $this->skillManager = new SkillManager();
+        }
+
+        // 如果有系统提示词或技能，添加到消息历史
+        $this->initializeSystemMessage();
+    }
+
+    /**
+     * 初始化系统消息
+     */
+    private function initializeSystemMessage(): void
+    {
+        $systemParts = [];
+
+        // 添加基础系统提示词
+        if ($this->systemPrompt !== '') {
+            $systemParts[] = $this->systemPrompt;
+        }
+
+        // 添加技能提示词
+        if ($this->withSkills && $this->skillManager !== null) {
+            $skillsPrompt = $this->skillManager->generatePrompt();
+            if ($skillsPrompt !== '') {
+                $systemParts[] = $skillsPrompt;
+            }
+        }
+
+        // 如果有系统消息，添加到历史
+        if (count($systemParts) > 0) {
+            $this->messages[] = [
+                'role' => 'system',
+                'content' => implode("\n\n", $systemParts)
+            ];
+        }
+    }
+
+    /**
+     * 聊天对话（非流式）
+     *
+     * @param string $userMessage 用户消息
+     * @param callable|null $onIteration 迭代回调 function(int $iteration, LLMResponse $response, array $toolResults)
+     * @return LLMResponse 响应对象
+     */
+    public function chat(string $userMessage, ?callable $onIteration = null): LLMResponse
+    {
+        // 创建请求
+        $request = $this->createRequest($userMessage);
+
+        // 多轮对话处理（支持工具调用）
+        $maxIterations = count($this->tools) > 0 ? 10 : 1;
+        $response = null;
+
+        for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
+            // 获取响应
+            $response = $this->provider->chat($request);
+
+            // 执行迭代回调
+            if ($onIteration !== null) {
+                $toolResults = [];
+                if ($response->hasToolCalls()) {
+                    $toolResults = $response->executeToolCalls();
+                }
+                $onIteration($iteration + 1, $response, $toolResults);
+
+                // 如果有工具调用，添加结果到请求和消息历史
+                if (count($toolResults) > 0) {
+                    // 添加助手响应到消息历史
+                    $assistantMessage = [
+                        'role' => 'assistant',
+                        'content' => $response->content
+                    ];
+
+                    // 如果有工具调用，添加到消息历史中
+                    if ($response->hasToolCalls()) {
+                        $assistantMessage['tool_calls'] = $response->toolCalls;
+                    }
+
+                    $this->messages[] = $assistantMessage;
+
+                    foreach ($toolResults as $result) {
+                        $request->addToolMessage($result['tool_call_id'], $result['result'] ?? $result['error']);
+
+                        // 添加到消息历史
+                        $this->messages[] = [
+                            'role' => 'tool',
+                            'tool_call_id' => $result['tool_call_id'],
+                            'content' => $result['result'] ?? $result['error']
+                        ];
+                    }
+                }
+            }
+
+            // 如果没有工具调用，结束对话
+            if (!$response->hasToolCalls()) {
+                break;
+            }
+
+            // 添加助手响应到消息历史
+            $assistantMessage = [
+                'role' => 'assistant',
+                'content' => $response->content
+            ];
+
+            // 如果有工具调用，添加到消息历史中
+            if ($response->hasToolCalls()) {
+                $assistantMessage['tool_calls'] = $response->toolCalls;
+            }
+
+            $this->messages[] = $assistantMessage;
+
+            // 执行工具调用
+            $toolResults = $response->executeToolCalls();
+
+            foreach ($toolResults as $result) {
+                // 添加工具结果到请求
+                $request->addToolMessage($result['tool_call_id'], $result['result'] ?? $result['error']);
+
+                // 添加到消息历史
+                $this->messages[] = [
+                    'role' => 'tool',
+                    'tool_call_id' => $result['tool_call_id'],
+                    'content' => $result['result'] ?? $result['error']
+                ];
+            }
+
+            // 如果没有工具调用，结束对话
+            if (!$response->hasToolCalls()) {
+                break;
+            }
+        }
+
+        // 添加最终响应到消息历史
+        if ($response !== null) {
+            $this->messages[] = [
+                'role' => 'assistant',
+                'content' => $response->content
+            ];
+        }
+
+        return $response;
+    }
+
+    /**
+     * 聊天对话（流式）
+     *
+     * @param string $userMessage 用户消息
+     * @param callable $callback 流式回调 function(LLMResponse $response, array $toolMessages = [])
+     * @return LLMResponse 最终响应对象
+     */
+    public function chatStream(string $userMessage, callable $callback): LLMResponse
+    {
+        // 创建请求
+        $request = $this->createRequest($userMessage);
+
+        // 多轮对话处理（支持工具调用）
+        $maxIterations = count($this->tools) > 0 ? 10 : 1;
+        $finalResponse = null;
+
+        for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
+            // 收集流式响应的完整内容
+            $fullContent = '';
+            $fullThinking = '';
+            $allToolCalls = [];
+
+            // 流式获取响应
+            $this->provider->chatStream($request, function(LLMResponse $response)
+                use ($callback, &$fullContent, &$fullThinking, &$allToolCalls) {
+
+                // 收集内容
+                if ($response->content !== '') {
+                    $fullContent .= $response->content;
+                }
+
+                // 收集思考过程
+                if ($response->thinking !== '') {
+                    $fullThinking .= $response->thinking;
+                }
+
+                // 收集工具调用
+                if (count($response->toolCalls) > 0) {
+                    $allToolCalls = array_merge($allToolCalls, $response->toolCalls);
+                }
+
+                // 调用用户回调
+                $callback($response, []);
+            });
+
+            // 创建最终响应
+            $finalResponse = LLMResponse::create()
+                ->content($fullContent)
+                ->thinking($fullThinking)
+                ->model($this->model)
+                ->done(true)
+                ->toolCalls($allToolCalls);
+
+            // 如果没有工具调用，结束对话
+            if (!$finalResponse->hasToolCalls()) {
+                // 添加助手响应到消息历史
+                $this->messages[] = [
+                    'role' => 'assistant',
+                    'content' => $fullContent
+                ];
+                break;
+            }
+
+            // 添加助手响应到消息历史
+            $assistantMessage = [
+                'role' => 'assistant',
+                'content' => $fullContent,
+                'tool_calls' => $allToolCalls
+            ];
+            $this->messages[] = $assistantMessage;
+
+            // 执行工具调用
+            $toolResults = $finalResponse->executeToolCalls();
+
+            $toolMessages = [];
+            foreach ($toolResults as $result) {
+                // 添加到消息历史
+                $toolMessage = [
+                    'role' => 'tool',
+                    'tool_call_id' => $result['tool_call_id'],
+                    'content' => $result['result'] ?? $result['error']
+                ];
+                $this->messages[] = $toolMessage;
+                $toolMessages[] = $toolMessage;
+            }
+
+            // 通知调用者工具消息已添加
+            $callback(LLMResponse::create()->done(true), $toolMessages);
+
+            // 创建新的请求（已经包含了完整的消息历史，包括刚才添加的助手消息和工具消息）
+            // 注意：这里不需要添加用户消息，因为消息历史已经包含了完整的上下文
+            $request = LLMRequest::create();
+            $request->addMessages($this->messages);
+            $request->model($this->model);
+            $request->temperature($this->temperature);
+            $request->maxTokens($this->maxTokens);
+            if ($this->think !== null) {
+                $request->think = $this->think;
+            }
+            foreach ($this->tools as $tool) {
+                $request->addTool($tool);
+            }
+        }
+
+        return $finalResponse;
+    }
+
+    /**
+     * 创建请求对象
+     *
+     * @param string $userMessage 用户消息
+     * @return LLMRequest
+     */
+    private function createRequest(string $userMessage): LLMRequest
+    {
+        $request = LLMRequest::create();
+
+        // 添加消息历史
+        $request->addMessages($this->messages);
+
+        // 添加当前用户消息到请求（如果有的话）
+        if ($userMessage !== '') {
+            $request->addUser($userMessage);
+
+            // 同时添加到消息历史（确保完整的对话记录）
+            $this->messages[] = [
+                'role' => 'user',
+                'content' => $userMessage
+            ];
+        }
+
+        // 设置参数
+        $request->model($this->model);
+        $request->temperature($this->temperature);
+        $request->maxTokens($this->maxTokens);
+
+        // 设置思考模式
+        if ($this->think !== null) {
+            $request->think = $this->think;
+        }
+
+        // 添加工具
+        foreach ($this->tools as $tool) {
+            $request->addTool($tool);
+        }
+
+        return $request;
+    }
+
+    /**
+     * 获取消息历史
+     *
+     * @return array
+     */
+    public function getMessages(): array
+    {
+        return $this->messages;
+    }
+}

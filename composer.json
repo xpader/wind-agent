@@ -1,0 +1,33 @@
+{
+    "name": "wind-framework/project",
+    "type": "project",
+    "description": "The skeleton application for the wind framework.",
+    "keywords": [
+        "wind",
+        "framework",
+        "coroutine"
+    ],
+    "require": {
+        "php": ">=8.1",
+        "wind-framework/collector": "^1.0",
+        "wind-framework/crontab": "^1.0",
+        "wind-framework/queue": "^1.0",
+        "wind-framework/redis": "^1.0",
+        "wind-framework/view": "^1.0",
+        "wind-framework/web": "^1.0",
+        "pader/phpinfo-cli-parser": "^1.0",
+        "twig/twig": "^3.3",
+        "wind-framework/console": "^1.0",
+        "wind-framework/cache": "^1.0",
+        "amphp/http-client": "^5.0",
+        "amphp/http-client-cookies": "^2.0",
+        "php-tui/php-tui": "^0.2.1"
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true,
+    "autoload": {
+        "psr-4": {
+            "App\\": "app/"
+        }
+    }
+}

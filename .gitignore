@@ -1,0 +1,8 @@
+.idea/
+.vscode/
+/vendor/
+/runtime/*
+.env
+workspace/
+.claude/
+.crush/
