@@ -143,65 +143,25 @@ class Agent
             // 获取响应
             $response = $this->provider->chat($request);
 
-            // 执行迭代回调
-            if ($onIteration !== null) {
-                $toolResults = [];
-                if ($response->hasToolCalls()) {
-                    $toolResults = $response->executeToolCalls();
-                }
-                $onIteration($iteration + 1, $response, $toolResults);
-
-                // 如果有工具调用，添加结果到请求和消息历史
-                if (count($toolResults) > 0) {
-                    // 添加助手响应到消息历史
-                    $assistantMessage = [
-                        'role' => 'assistant',
-                        'content' => $response->content
-                    ];
-
-                    // 如果有工具调用，添加到消息历史中
-                    if ($response->hasToolCalls()) {
-                        $assistantMessage['tool_calls'] = $response->toolCalls;
-                    }
-
-                    $this->messages[] = $assistantMessage;
-
-                    foreach ($toolResults as $result) {
-                        $request->addToolMessage($result['tool_call_id'], $result['result'] ?? $result['error']);
-
-                        // 添加到消息历史
-                        $this->messages[] = [
-                            'role' => 'tool',
-                            'tool_call_id' => $result['tool_call_id'],
-                            'content' => $result['result'] ?? $result['error']
-                        ];
-                    }
-                }
-            }
-
             // 如果没有工具调用，结束对话
             if (!$response->hasToolCalls()) {
+                // 添加最终助手响应到消息历史
+                $this->messages[] = [
+                    'role' => 'assistant',
+                    'content' => $response->content
+                ];
                 break;
             }
 
             // 添加助手响应到消息历史
-            $assistantMessage = [
-                'role' => 'assistant',
-                'content' => $response->content
-            ];
-
-            // 如果有工具调用，添加到消息历史中
-            if ($response->hasToolCalls()) {
-                $assistantMessage['tool_calls'] = $response->toolCalls;
-            }
-
+            $assistantMessage = $this->createAssistantMessage($response->content, $response->toolCalls);
             $this->messages[] = $assistantMessage;
 
             // 执行工具调用
             $toolResults = $response->executeToolCalls();
 
+            // 添加工具消息到请求和消息历史
             foreach ($toolResults as $result) {
-                // 添加工具结果到请求
                 $request->addToolMessage($result['tool_call_id'], $result['result'] ?? $result['error']);
 
                 // 添加到消息历史
@@ -212,18 +172,10 @@ class Agent
                 ];
             }
 
-            // 如果没有工具调用，结束对话
-            if (!$response->hasToolCalls()) {
-                break;
+            // 执行迭代回调
+            if ($onIteration !== null) {
+                $onIteration($iteration + 1, $response, $toolResults);
             }
-        }
-
-        // 添加最终响应到消息历史
-        if ($response !== null) {
-            $this->messages[] = [
-                'role' => 'assistant',
-                'content' => $response->content
-            ];
         }
 
         return $response;
@@ -285,20 +237,12 @@ class Agent
             // 如果没有工具调用，结束对话
             if (!$finalResponse->hasToolCalls()) {
                 // 添加助手响应到消息历史
-                $this->messages[] = [
-                    'role' => 'assistant',
-                    'content' => $fullContent
-                ];
+                $this->messages[] = $this->createAssistantMessage($fullContent);
                 break;
             }
 
             // 添加助手响应到消息历史
-            $assistantMessage = [
-                'role' => 'assistant',
-                'content' => $fullContent,
-                'tool_calls' => $allToolCalls
-            ];
-            $this->messages[] = $assistantMessage;
+            $this->messages[] = $this->createAssistantMessage($fullContent, $allToolCalls);
 
             // 执行工具调用
             $toolResults = $finalResponse->executeToolCalls();
@@ -334,6 +278,28 @@ class Agent
         }
 
         return $finalResponse;
+    }
+
+    /**
+     * 创建助手消息
+     *
+     * @param string $content 响应内容
+     * @param array $toolCalls 工具调用列表
+     * @return array 助手消息数组
+     */
+    private function createAssistantMessage(string $content, array $toolCalls = []): array
+    {
+        $message = [
+            'role' => 'assistant',
+            'content' => $content
+        ];
+
+        // 如果有工具调用，添加到消息中
+        if (count($toolCalls) > 0) {
+            $message['tool_calls'] = $toolCalls;
+        }
+
+        return $message;
     }
 
     /**

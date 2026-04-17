@@ -16,6 +16,7 @@ class ToolManager
      * 初始化工具管理器
      *
      * @return void
+     * @throws \RuntimeException 如果工具加载失败
      */
     public static function init(): void
     {
@@ -23,12 +24,16 @@ class ToolManager
 
         // 加载启用的工具
         foreach ($config['enabled'] as $toolClass) {
-            if (class_exists($toolClass)) {
-                $tool = new $toolClass();
-                if ($tool instanceof ToolInterface) {
-                    self::$tools[$tool->getName()] = $tool;
-                }
+            if (!class_exists($toolClass)) {
+                throw new \RuntimeException("工具类不存在：{$toolClass}");
             }
+
+            $tool = new $toolClass();
+            if (!($tool instanceof ToolInterface)) {
+                throw new \RuntimeException("工具类必须实现 ToolInterface 接口：{$toolClass}");
+            }
+
+            self::$tools[$tool->getName()] = $tool;
         }
     }
 
@@ -67,7 +72,7 @@ class ToolManager
      * @param string $toolName 工具名称
      * @param array $arguments 参数
      * @return string 执行结果
-     * @throws \RuntimeException
+     * @throws \RuntimeException 仅当工具不存在时抛出异常
      */
     public static function execute(string $toolName, array $arguments): string
     {
@@ -77,7 +82,12 @@ class ToolManager
             throw new \RuntimeException("工具不存在：{$toolName}");
         }
 
-        return $tool->execute($arguments);
+        try {
+            return $tool->execute($arguments);
+        } catch (\Throwable $e) {
+            // 捕获工具执行异常，返回带有明确失败标识的错误消息
+            return "[{$toolName}] 调用失败：{$e->getMessage()}";
+        }
     }
 
     /**

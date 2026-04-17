@@ -72,20 +72,20 @@ class ReadSkillTool implements ToolInterface
         $skillName = $arguments['skill_name'] ?? '';
 
         if (empty($skillName)) {
-            return "Error: skill_name is required";
+            throw new \RuntimeException('skill_name is required');
         }
 
         $skillFile = self::SKILL_BASE_DIR . '/' . $skillName . '/SKILL.md';
 
         if (!file_exists($skillFile)) {
             $available = implode(', ', $this->getAvailableSkillNames());
-            return "Error: Unknown skill '{$skillName}'. Available skills: {$available}";
+            throw new \RuntimeException("Unknown skill '{$skillName}'. Available skills: {$available}");
         }
 
         $content = file_get_contents($skillFile);
 
         if ($content === false) {
-            return "Error: Failed to read SKILL.md for skill '{$skillName}'";
+            throw new \RuntimeException("Failed to read SKILL.md for skill '{$skillName}'");
         }
 
         return $content;

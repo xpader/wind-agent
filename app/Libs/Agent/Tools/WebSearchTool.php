@@ -94,7 +94,7 @@ class WebSearchTool implements ToolInterface
         $query = $arguments['query'] ?? '';
 
         if (empty($query)) {
-            return $this->formatError('搜索查询不能为空');
+            throw new \RuntimeException('搜索查询不能为空');
         }
 
         // 构建请求参数
@@ -109,12 +109,8 @@ class WebSearchTool implements ToolInterface
         ];
 
         // 执行搜索
-        try {
-            $result = $this->search($params);
-            return $this->formatResult($result);
-        } catch (\Exception $e) {
-            return $this->formatError('搜索失败：' . $e->getMessage());
-        }
+        $result = $this->search($params);
+        return $this->formatResult($result);
     }
 
     public function toArray(): array
@@ -218,16 +214,5 @@ class WebSearchTool implements ToolInterface
         }
 
         return implode("\n", $output);
-    }
-
-    /**
-     * 格式化错误信息
-     *
-     * @param string $message 错误消息
-     * @return string
-     */
-    private function formatError(string $message): string
-    {
-        return "❌ 搜索错误: {$message}";
     }
 }

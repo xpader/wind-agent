@@ -38,20 +38,20 @@ class ReadFileTool implements ToolInterface
         $path = $arguments['path'] ?? '';
 
         if (empty($path)) {
-            return '错误：文件路径不能为空';
+            throw new \RuntimeException('文件路径不能为空');
         }
 
         if (!file_exists($path)) {
-            return "错误：文件不存在：{$path}";
+            throw new \RuntimeException("文件不存在：{$path}");
         }
 
         if (!is_readable($path)) {
-            return "错误：文件不可读：{$path}";
+            throw new \RuntimeException("文件不可读：{$path}");
         }
 
         $content = file_get_contents($path);
         if ($content === false) {
-            return "错误：无法读取文件：{$path}";
+            throw new \RuntimeException("无法读取文件：{$path}");
         }
 
         return $content;

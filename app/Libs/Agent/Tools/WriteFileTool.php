@@ -43,17 +43,17 @@ class WriteFileTool implements ToolInterface
         $content = $arguments['content'] ?? '';
 
         if (empty($path)) {
-            return '错误：文件路径不能为空';
+            throw new \RuntimeException('文件路径不能为空');
         }
 
         $directory = dirname($path);
         if (!is_dir($directory) && !mkdir($directory, 0755, true)) {
-            return "错误：无法创建目录：{$directory}";
+            throw new \RuntimeException("无法创建目录：{$directory}");
         }
 
         $result = file_put_contents($path, $content);
         if ($result === false) {
-            return "错误：无法写入文件：{$path}";
+            throw new \RuntimeException("无法写入文件：{$path}");
         }
 
         return "成功：已写入 {$result} 字节到文件：{$path}";

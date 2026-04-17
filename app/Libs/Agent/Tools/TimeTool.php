@@ -59,56 +59,52 @@ class TimeTool implements ToolInterface
         $format = $arguments['format'] ?? 'default';
         $timezone = $arguments['timezone'] ?? '';
 
-        try {
-            // 设置时区
-            if ($timezone !== '') {
-                $timezoneObj = new \DateTimeZone($timezone);
-            } else {
-                $timezoneObj = new \DateTimeZone(date_default_timezone_get());
-            }
+        // 设置时区
+        if ($timezone !== '') {
+            $timezoneObj = new \DateTimeZone($timezone);
+        } else {
+            $timezoneObj = new \DateTimeZone(date_default_timezone_get());
+        }
 
-            $dateTime = new \DateTime('now', $timezoneObj);
+        $dateTime = new \DateTime('now', $timezoneObj);
 
-            // 根据格式返回时间
-            switch ($format) {
-                case 'iso':
-                    return $dateTime->format('c'); // ISO 8601 格式
+        // 根据格式返回时间
+        switch ($format) {
+            case 'iso':
+                return $dateTime->format('c'); // ISO 8601 格式
 
-                case 'timestamp':
-                    return (string)$dateTime->getTimestamp();
+            case 'timestamp':
+                return (string)$dateTime->getTimestamp();
 
-                case 'date':
-                    return $dateTime->format('Y-m-d');
+            case 'date':
+                return $dateTime->format('Y-m-d');
 
-                case 'time':
-                    return $dateTime->format('H:i:s');
+            case 'time':
+                return $dateTime->format('H:i:s');
 
-                case 'full':
-                    return sprintf(
-                        "%s 年 %s 月 %s 日 %s:%s:%s %s",
-                        $dateTime->format('Y'),
-                        $dateTime->format('n'),
-                        $dateTime->format('j'),
-                        $dateTime->format('H'),
-                        $dateTime->format('i'),
-                        $dateTime->format('s'),
-                        $timezoneObj->getName()
-                    );
+            case 'full':
+                return sprintf(
+                    "%s 年 %s 月 %s 日 %s:%s:%s %s",
+                    $dateTime->format('Y'),
+                    $dateTime->format('n'),
+                    $dateTime->format('j'),
+                    $dateTime->format('H'),
+                    $dateTime->format('i'),
+                    $dateTime->format('s'),
+                    $timezoneObj->getName()
+                );
 
-                case 'default':
-                default:
-                    return sprintf(
-                        "%s年%s月%s日 %s:%s:%s",
-                        $dateTime->format('Y'),
-                        $dateTime->format('n'),
-                        $dateTime->format('j'),
-                        $dateTime->format('H'),
-                        $dateTime->format('i'),
-                        $dateTime->format('s')
-                    );
-            }
-        } catch (\Exception $e) {
-            return "获取时间失败： " . $e->getMessage();
+            case 'default':
+            default:
+                return sprintf(
+                    "%s年%s月%s日 %s:%s:%s",
+                    $dateTime->format('Y'),
+                    $dateTime->format('n'),
+                    $dateTime->format('j'),
+                    $dateTime->format('H'),
+                    $dateTime->format('i'),
+                    $dateTime->format('s')
+                );
         }
     }
 

@@ -114,18 +114,13 @@ class LLMResponse
                 $arguments = json_decode($arguments, true) ?? [];
             }
 
-            try {
-                $result = ToolManager::execute($functionName, $arguments);
-                $results[] = [
-                    'tool_call_id' => $call['id'],
-                    'result' => $result
-                ];
-            } catch (\Throwable $e) {
-                $results[] = [
-                    'tool_call_id' => $call['id'],
-                    'error' => $e->getMessage()
-                ];
-            }
+            // ToolManager::execute() 现在总是返回字符串（成功或错误信息）
+            $result = ToolManager::execute($functionName, $arguments);
+
+            $results[] = [
+                'tool_call_id' => $call['id'],
+                'result' => $result
+            ];
         }
         return $results;
     }
