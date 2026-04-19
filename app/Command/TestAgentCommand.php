@@ -14,6 +14,8 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
+use Symfony\Component\Console\Question\Question;
+use Symfony\Component\Console\Helper\QuestionHelper;
 
 /**
  * Agent 测试命令
@@ -24,12 +26,12 @@ class TestAgentCommand extends Command
     protected function configure()
     {
         $this->setName('test:agent')
-            ->setDescription('测试 Agent 类功能')
+            ->setDescription('测试 Agent 类功能（支持多轮交互式对话）')
             ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek)', 'ollama')
             ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '172.19.208.203:11434')
             ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:9b-q8_0')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '系统提示词', '你是一个专业的 AI 助手，可以帮助用户解决各种问题。')
-            ->addOption('message', null, InputOption::VALUE_OPTIONAL, '用户消息', '你好，请介绍一下你自己')
+            ->addOption('message', null, InputOption::VALUE_OPTIONAL, '初始用户消息（可选，未指定则直接进入交互模式）')
             ->addOption('max-tokens', null, InputOption::VALUE_OPTIONAL, '最大 token 数', '32768')
             ->addOption('temperature', 't', InputOption::VALUE_OPTIONAL, '温度参数 (0-2)', '0.7')
             ->addOption('stream', 's', InputOption::VALUE_NONE, '使用流式输出')
@@ -66,27 +68,28 @@ class TestAgentCommand extends Command
         $this->displayHeader($output, $config);
 
         try {
-            // 执行对话
-            if ($config['useStream']) {
-                $response = $this->executeStreamChat($agent, $config, $output);
+            // 如果没有提供初始消息，直接进入交互模式
+            if ($config['userMessage'] === null) {
+                $output->writeln('<fg=yellow;options=bold>进入交互模式 (Ctrl+C 退出)</>');
+                $output->writeln('');
             } else {
-                $response = $this->executeNormalChat($agent, $config, $output);
-            }
+                // 执行初始对话
+                if ($config['useStream']) {
+                    $this->executeStreamChat($agent, $config, $output);
+                } else {
+                    $response = $this->executeNormalChat($agent, $config, $output);
+                    // 显示响应详情
+                    $this->displayResponseDetails($response, $config, $output);
+                }
 
-            // 显示响应详情
-            $this->displayResponseDetails($response, $config, $output);
-
-            $output->writeln('<fg=green;options=bold>✅ 测试完成！</>');
-
-            // 打印完整的消息历史（如果启用了选项）
-            if ($config['showHistory']) {
-                $messages = $agent->getMessages();
+                $output->writeln('<fg=green;options=bold>✅ 初始对话完成！</>');
                 $output->writeln('');
-                $output->writeln('<fg=blue;options=bold>========== 完整消息历史 ==========');
-                $output->writeln('<fg=blue>总消息数: ' . count($messages) . '</fg=blue>');
-                $output->writeln('<fg=blue>' . print_r($messages, true) . '</fg=blue>');
+                $output->writeln('<fg=yellow;options=bold>继续对话中... (Ctrl+C 退出)</>');
                 $output->writeln('');
             }
+
+            // 进入交互式多轮对话循环
+            $this->runInteractiveLoop($agent, $config, $input, $output);
 
             return self::SUCCESS;
 
@@ -228,15 +231,17 @@ class TestAgentCommand extends Command
     /**
      * 执行普通对话
      */
-    private function executeNormalChat(Agent $agent, array $config, OutputInterface $output): LLMResponse
+    private function executeNormalChat(Agent $agent, array $config, OutputInterface $output, ?string $userMessage = null): LLMResponse
     {
+        $message = $userMessage ?? $config['userMessage'];
+
         $output->writeln('<fg=yellow>开始对话...</>');
         $output->writeln('');
 
         $shownToolCalls = []; // 跟踪已显示的工具调用
 
         // 使用迭代回调来显示每一步的执行过程
-        $response = $agent->chat($config['userMessage'], function($iteration, $response, $toolResults) use ($output, &$shownToolCalls) {
+        $response = $agent->chat($message, function($iteration, $response, $toolResults) use ($output, &$shownToolCalls) {
             // 先检查是否有工具调用，在显示响应前就显示工具信息
             if ($response->hasToolCalls()) {
                 $output->writeln("<fg=cyan;options=bold>--- 第 {$iteration} 轮对话 ---</>");
@@ -286,8 +291,10 @@ class TestAgentCommand extends Command
     /**
      * 执行流式对话
      */
-    private function executeStreamChat(Agent $agent, array $config, OutputInterface $output): LLMResponse
+    private function executeStreamChat(Agent $agent, array $config, OutputInterface $output, ?string $userMessage = null): LLMResponse
     {
+        $message = $userMessage ?? $config['userMessage'];
+
         $output->writeln('<fg=yellow>开始流式对话...</>');
         $output->writeln('');
 
@@ -297,7 +304,7 @@ class TestAgentCommand extends Command
         $currentIteration = 0; // 跟踪当前迭代次数
 
         // 调用 Agent 的流式对话
-        $finalResponse = $agent->chatStream($config['userMessage'], function(LLMResponse $response, array $toolMessages = [])
+        $finalResponse = $agent->chatStream($message, function(LLMResponse $response, array $toolMessages = [])
             use ($output, &$hasThinking, &$hasContent, &$processedToolCalls, &$currentIteration) {
 
             // 检测是否是新一轮对话（通过检查是否有工具消息来判断）
@@ -422,6 +429,77 @@ class TestAgentCommand extends Command
         }
 
         $output->writeln('');
+    }
+
+    /**
+     * 交互式多轮对话循环
+     */
+    private function runInteractiveLoop(Agent $agent, array $config, InputInterface $input, OutputInterface $output): void
+    {
+        $questionHelper = new QuestionHelper();
+
+        $output->writeln('<fg=white;options=bold>========================================</>');
+        $output->writeln('<fg=white;options=bold>输入你的消息，按 Enter 发送</>');
+        $output->writeln('<fg=white;options=bold>输入 "quit" 或 "exit" 退出</>');
+        $output->writeln('<fg=white;options=bold>按 Ctrl+C 强制退出</>');
+        $output->writeln('<fg=white;options=bold>========================================</>');
+        $output->writeln('');
+
+        while (true) {
+            // 创建问题
+            $question = new Question('<fg=yellow;options=bold>You: </>');
+
+            // 不允许空输入（但 QuestionHelper 会一直询问，所以我们需要自定义验证器）
+            $question->setValidator(function ($answer) {
+                if ($answer === 'quit' || $answer === 'exit' || $answer === 'q') {
+                    return '__QUIT__';  // 特殊标记表示退出
+                }
+
+                if ($answer === null || $answer === '') {
+                    return '';  // 返回空字符串，让循环继续
+                }
+
+                return $answer;
+            });
+
+            $question->setMaxAttempts(null);  // 无限次尝试
+
+            try {
+                // 询问用户
+                $userMessage = $questionHelper->ask($input, $output, $question);
+
+                // 检查是否退出
+                if ($userMessage === '__QUIT__') {
+                    $output->writeln('<fg=green>👋 再见！</>');
+                    break;
+                }
+
+                // 跳过空输入
+                if ($userMessage === '') {
+                    continue;
+                }
+
+                $output->writeln('');
+
+                // 执行对话
+                if ($config['useStream']) {
+                    $this->executeStreamChat($agent, $config, $output, $userMessage);
+                } else {
+                    $response = $this->executeNormalChat($agent, $config, $output, $userMessage);
+                    // 显示响应详情
+                    $this->displayResponseDetails($response, $config, $output);
+                }
+
+                $output->writeln('');
+                $output->writeln('<fg=green;options=bold>✅ 响应完成！</>');
+                $output->writeln('');
+
+            } catch (\Throwable $e) {
+                $this->displayError($e, $output);
+                $output->writeln('<fg=yellow>⚠️  对话出错，请重试</>');
+                $output->writeln('');
+            }
+        }
     }
 
     /**

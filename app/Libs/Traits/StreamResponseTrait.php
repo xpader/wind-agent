@@ -90,8 +90,10 @@ trait StreamResponseTrait
         $buffer = '';
 
         while (($chunk = $streamBody->read()) !== null && $chunk !== '') {
-            // UTF-8 编码处理（使用 //TRANSLIT 代替 //IGNORE，更安全）
-            $chunk = iconv('UTF-8', 'UTF-8//TRANSLIT', $chunk);
+            // UTF-8 编码处理（使用 //IGNORE 忽略不完整的多字节字符）
+            // 注意：这可能会导致少量字符丢失，但可以避免 PHP Notice
+            // TODO: 实现更完善的 UTF-8 流式处理（参考 docs/utf8-stream-issue.md）
+            $chunk = iconv('UTF-8', 'UTF-8//IGNORE', $chunk);
             $buffer .= $chunk;
 
             // 按行分割，保留最后一个可能不完整的行
