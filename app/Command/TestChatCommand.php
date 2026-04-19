@@ -6,9 +6,8 @@ use App\Libs\LLM\LLMClient;
 use App\Libs\LLM\LLMResponse;
 use App\Libs\LLM\Clients\OpenAiClient;
 use App\Libs\LLM\Clients\OllamaClient;
+use App\Libs\LLM\Clients\MiniMaxClient;
 use App\Libs\LLM\LLMRequest;
-use App\Libs\Agent\ToolManager;
-use App\Libs\Agent\SkillManager;
 use Amp\Http\Client\HttpClientBuilder;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -16,28 +15,25 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 
 /**
- * 统一的聊天测试命令
- * 整合 LLM、工具、技能的所有测试功能
+ * 聊天测试命令
+ * 专注于 LLM 聊天功能测试
  */
 class TestChatCommand extends Command
 {
     protected function configure()
     {
         $this->setName('test:chat')
-            ->setDescription('统一的聊天测试命令（支持 LLM、工具、技能）')
-            ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama)', 'ollama')
+            ->setDescription('聊天测试命令（支持多种 LLM 平台）')
+            ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek)', 'ollama')
             ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '172.19.208.203:11434')
             ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:9b-q8_0')
-            ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '提示词', '你好，请简单介绍一下你自己')
+            ->addOption('system', 's', InputOption::VALUE_OPTIONAL, '系统提示词', '')
+            ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '用户提示词', '你好，请简单介绍一下你自己')
             ->addOption('temperature', 't', InputOption::VALUE_OPTIONAL, '温度参数 (0-2)', '0.7')
             ->addOption('max-tokens', null, InputOption::VALUE_OPTIONAL, '最大 token 数', '2000')
-            ->addOption('stream', 's', InputOption::VALUE_NONE, '使用流式输出')
+            ->addOption('stream', null, InputOption::VALUE_NONE, '使用流式输出')
             ->addOption('think', null, InputOption::VALUE_OPTIONAL, '启用思考模式 (true/false/high/medium/low)')
-            ->addOption('with-tools', null, InputOption::VALUE_NONE, '启用工具调用')
-            ->addOption('with-skills', null, InputOption::VALUE_NONE, '启用技能支持')
-            ->addOption('list-models', 'l', InputOption::VALUE_NONE, '列出可用模型')
-            ->addOption('show-prompt', null, InputOption::VALUE_NONE, '显示系统提示词和请求内容')
-            ->addOption('single-step', null, InputOption::VALUE_NONE, '单步模式（每次工具调用后暂停）');
+            ->addOption('list-models', 'l', InputOption::VALUE_NONE, '列出可用模型');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output)
@@ -60,11 +56,6 @@ class TestChatCommand extends Command
             // 创建请求
             $request = $this->buildRequest($config, $output);
 
-            // 显示系统提示词（如果请求）
-            if ($config['showPrompt']) {
-                $this->displaySystemPrompt($request, $output);
-            }
-
             // 执行对话
             $response = $this->executeChat($client, $request, $config, $output);
 
@@ -85,20 +76,29 @@ class TestChatCommand extends Command
      */
     private function parseConfig(InputInterface $input): array
     {
+        $clientType = $input->getOption('client');
+        $host = $input->getOption('host');
+
+        // 根据客户端类型设置正确的 host
+        if ($clientType === 'minimax') {
+            $host = 'https://api.minimaxi.com/v1'; // MiniMax 地址固定
+        }
+
+        if ($clientType === 'deepseek') {
+            $host = 'https://api.deepseek.com'; // DeepSeek 地址固定
+        }
+
         return [
-            'clientType' => $input->getOption('client'),
-            'host' => $input->getOption('host'),
+            'clientType' => $clientType,
+            'host' => $host,
             'model' => $input->getOption('model'),
+            'systemPrompt' => $input->getOption('system'),
             'prompt' => $input->getOption('prompt'),
             'temperature' => (float) $input->getOption('temperature'),
             'maxTokens' => (int) $input->getOption('max-tokens'),
             'useStream' => $input->getOption('stream'),
             'think' => $input->getOption('think'),
-            'withTools' => $input->getOption('with-tools') || $input->getOption('with-skills'),
-            'withSkills' => $input->getOption('with-skills'),
             'listModels' => $input->getOption('list-models'),
-            'showPrompt' => $input->getOption('show-prompt'),
-            'singleStep' => $input->getOption('single-step'),
         ];
     }
 
@@ -118,6 +118,36 @@ class TestChatCommand extends Command
             );
         }
 
+        if ($type === 'minimax') {
+            // MiniMax TokenPlan 使用专用客户端
+            $apiKey = config('llm.providers.minimax.api_key');
+            if (!$apiKey) {
+                throw new \RuntimeException('MiniMax API Key 未设置，请在 .env 中设置 MINIMAX_API_KEY');
+            }
+
+            return new MiniMaxClient(
+                httpClient: $httpClient,
+                apiKey: $apiKey,
+                baseUrl: $host,
+                timeout: 60
+            );
+        }
+
+        if ($type === 'deepseek') {
+            // DeepSeek 使用 OpenAI 兼容客户端
+            $apiKey = config('llm.providers.deepseek.api_key');
+            if (!$apiKey) {
+                throw new \RuntimeException('DeepSeek API Key 未设置，请在 .env 中设置 DEEPSEEK_API_KEY');
+            }
+
+            return new OpenAiClient(
+                httpClient: $httpClient,
+                apiKey: $apiKey,
+                baseUrl: $host,
+                timeout: 60
+            );
+        }
+
         return new OllamaClient(
             httpClient: $httpClient,
             baseUrl: "http://{$host}",
@@ -130,7 +160,14 @@ class TestChatCommand extends Command
      */
     private function displayHeader(OutputInterface $output, array $config): void
     {
-        $clientName = $config['clientType'] === 'openai' ? 'OpenAI 兼容客户端' : 'Ollama 原生客户端';
+        $clientNames = [
+            'openai' => 'OpenAI 兼容客户端',
+            'minimax' => 'MiniMax TokenPlan 客户端',
+            'deepseek' => 'DeepSeek 客户端',
+            'ollama' => 'Ollama 原生客户端'
+        ];
+
+        $clientName = $clientNames[$config['clientType']] ?? '未知客户端';
 
         $output->writeln('');
         $output->writeln('<fg=blue;options=bold>========================================</>');
@@ -140,7 +177,10 @@ class TestChatCommand extends Command
         $output->writeln("<info>客户端类型:</info> {$clientName}");
         $output->writeln("<info>服务地址:</info> {$config['host']}");
         $output->writeln("<info>模型名称:</info> {$config['model']}");
-        $output->writeln("<info>提示词:</info> {$config['prompt']}");
+        if ($config['systemPrompt']) {
+            $output->writeln("<info>系统提示词:</info> {$config['systemPrompt']}");
+        }
+        $output->writeln("<info>用户提示词:</info> {$config['prompt']}");
         $output->writeln("<info>温度参数:</info> {$config['temperature']}");
         $output->writeln("<info>最大 tokens:</info> {$config['maxTokens']}");
 
@@ -149,15 +189,6 @@ class TestChatCommand extends Command
         }
         if ($config['think']) {
             $output->writeln("<info>思考模式:</info> {$config['think']}");
-        }
-        if ($config['withTools']) {
-            $output->writeln("<info>工具调用:</info> 启用");
-        }
-        if ($config['withSkills']) {
-            $output->writeln("<info>技能支持:</info> 启用");
-        }
-        if ($config['singleStep']) {
-            $output->writeln("<info>单步模式:</info> 启用");
         }
         $output->writeln('');
     }
@@ -191,36 +222,23 @@ class TestChatCommand extends Command
     private function buildRequest(array $config, OutputInterface $output): LLMRequest
     {
         $request = LLMRequest::create()
-            ->addUser($config['prompt'])
             ->model($config['model'])
             ->temperature($config['temperature'])
             ->maxTokens($config['maxTokens']);
+
+        // 添加系统提示词
+        if ($config['systemPrompt']) {
+            $request->addSystem($config['systemPrompt']);
+        }
+
+        // 添加用户提示词
+        $request->addUser($config['prompt']);
 
         // 启用思考模式
         if ($config['think'] !== null) {
             $request->think = $config['think'] === 'true' || $config['think'] === 'false'
                 ? $config['think'] === 'true'
                 : $config['think'];
-        }
-
-        // 添加工具
-        if ($config['withTools']) {
-            foreach (ToolManager::getAll() as $tool) {
-                $request->addTool($tool);
-            }
-            $output->writeln("<info>已加载工具:</info> " . count($request->tools) . " 个");
-        }
-
-        // 添加技能
-        if ($config['withSkills']) {
-            $skillManager = new SkillManager();
-            $skillsPrompt = $skillManager->generatePrompt();
-            if ($skillsPrompt !== '') {
-                $request->messages = array_merge([
-                    ['role' => 'system', 'content' => $skillsPrompt]
-                ], $request->messages);
-                $output->writeln("<info>已加载技能:</info> {$skillManager->count()} 个");
-            }
         }
 
         $output->writeln('');
@@ -231,41 +249,18 @@ class TestChatCommand extends Command
     }
 
     /**
-     * 执行对话（支持多轮）
+     * 执行对话
      */
     private function executeChat(LLMClient $client, LLMRequest $request, array $config, OutputInterface $output): LLMResponse
     {
-        $maxIterations = $config['withTools'] ? 10 : 1;
-        $response = null;
+        // 获取响应
+        $response = $config['useStream']
+            ? $this->getStreamResponse($client, $request, $config, $output)
+            : $client->chat($request);
 
-        for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
-            if ($config['withTools']) {
-                $output->writeln("<fg=cyan;options=bold>--- 第 " . ($iteration + 1) . " 轮对话 ---</>");
-            }
-
-            // 获取响应
-            $response = $config['useStream']
-                ? $this->getStreamResponse($client, $request, $config, $output)
-                : $client->chat($request);
-
-            // 显示响应（流式模式已在 getStreamResponse 中显示，这里只处理非流式）
-            if (!$config['useStream']) {
-                $this->displayResponse($response, $output);
-            }
-
-            // 如果没有工具调用，结束对话
-            if (!$response->hasToolCalls()) {
-                break;
-            }
-
-            // 执行工具调用
-            $this->executeToolCalls($response, $request, $output);
-
-            // 单步模式
-            if ($config['singleStep']) {
-                $output->writeln('<fg=yellow>按回车继续...</>');
-                fgets(STDIN);
-            }
+        // 显示响应（流式模式已在 getStreamResponse 中显示，这里只处理非流式）
+        if (!$config['useStream']) {
+            $this->displayResponse($response, $output);
         }
 
         return $response;
@@ -365,14 +360,6 @@ class TestChatCommand extends Command
             $output->writeln('');
         }
 
-        // 显示工具调用信息
-        if (count($response->toolCalls) > 0) {
-            $output->writeln('<fg=magenta;options=bold>========== 工具调用 ==========</>');
-            $output->writeln("<fg=magenta>检测到 " . count($response->toolCalls) . " 个工具调用</>");
-            $output->writeln('<fg=magenta;options=bold>================================</>');
-            $output->writeln('');
-        }
-
         // 显示最终输出
         if ($response->content !== '') {
             $output->writeln('<fg=green;options=bold>========== 最终输出 ==========</>');
@@ -385,47 +372,6 @@ class TestChatCommand extends Command
     }
 
     /**
-     * 执行工具调用
-     */
-    private function executeToolCalls(LLMResponse $response, LLMRequest $request, OutputInterface $output): void
-    {
-        $output->writeln('<fg=yellow>========== 执行工具调用 ==========');
-
-        // 添加助手响应到请求中
-        $request->addAssistant($response->content);
-
-        // 执行工具调用
-        $toolResults = $response->executeToolCalls();
-
-        foreach ($toolResults as $index => $result) {
-            $toolCall = $response->toolCalls[$index];
-            $toolName = $toolCall['function']['name'];
-            $toolArgs = $toolCall['function']['arguments'];
-
-            if (is_string($toolArgs)) {
-                $toolArgs = json_decode($toolArgs, true) ?? [];
-            }
-
-            $toolNum = $index + 1;
-            $output->writeln("<fg=magenta>工具 {$toolNum}: {$toolName}</fg=magenta>");
-            $output->writeln("<fg=magenta>参数:</fg=magenta> " . json_encode($toolArgs, JSON_UNESCAPED_UNICODE));
-
-            if (isset($result['error'])) {
-                $output->writeln("  <fg=red>错误:</fg=red> {$result['error']}");
-                $request->addToolMessage($result['tool_call_id'], "错误：{$result['error']}");
-            } else {
-                $output->writeln("  <fg=green>结果:</fg=green>");
-                $output->writeln("  <fg=green>" . $result['result'] . '</fg=green>');
-                $request->addToolMessage($result['tool_call_id'], $result['result']);
-            }
-            $output->writeln('');
-        }
-
-        $output->writeln('<fg=yellow>========================================</>');
-        $output->writeln('');
-    }
-
-    /**
      * 显示响应详情
      */
     private function displayResponseDetails(LLMResponse $response, array $config, OutputInterface $output): void
@@ -435,7 +381,6 @@ class TestChatCommand extends Command
         $output->writeln("<info>完成状态:</info> " . ($response->done ? '是' : '否'));
         $output->writeln("<info>完成原因:</info> " . ($response->finishReason ?? 'N/A'));
         $output->writeln("<info>响应长度:</info> {$response->getContentLength()} 字符");
-        $output->writeln("<info>工具调用数:</info> " . count($response->toolCalls));
 
         if ($response->usage !== null) {
             $output->writeln('');
@@ -451,86 +396,6 @@ class TestChatCommand extends Command
         }
 
         $output->writeln('<fg=cyan;options=bold>================================</>');
-        $output->writeln('');
-    }
-
-    /**
-     * 显示系统提示词和请求内容
-     */
-    private function displaySystemPrompt(LLMRequest $request, OutputInterface $output): void
-    {
-        $output->writeln('');
-        $output->writeln('<fg=blue;options=bold>========== 系统提示词和请求内容 ==========</>');
-        $output->writeln('');
-
-        $messages = $request->getMessages();
-
-        if (count($messages) === 0) {
-            $output->writeln('<fg=gray>(无消息)</fg=gray>');
-            $output->writeln('');
-            return;
-        }
-
-        foreach ($messages as $index => $message) {
-            $role = $message['role'] ?? 'unknown';
-            $content = $message['content'] ?? '';
-
-            $roleLabel = match($role) {
-                'system' => '系统',
-                'user' => '用户',
-                'assistant' => '助手',
-                'tool' => '工具',
-                default => $role
-            };
-
-            $roleColor = match($role) {
-                'system' => 'cyan',
-                'user' => 'green',
-                'assistant' => 'blue',
-                'tool' => 'magenta',
-                default => 'gray'
-            };
-
-            $output->writeln("<fg={$roleColor};options=bold>========== 第 " . ($index + 1) . " 条消息 ({$roleLabel}) ==========</>");
-
-            if ($role === 'system') {
-                // 系统消息可能很长，分段显示
-                $lines = explode("\n", $content);
-                foreach ($lines as $line) {
-                    $output->writeln("<fg={$roleColor}>{$line}</fg={$roleColor}>");
-                }
-            } else {
-                $output->writeln("<fg={$roleColor}>{$content}</fg={$roleColor}>");
-            }
-            $output->writeln('');
-        }
-
-        // 显示工具定义
-        if (count($request->tools) > 0) {
-            $output->writeln('<fg=magenta;options=bold>========== 可用工具 ==========</>');
-            foreach ($request->tools as $tool) {
-                $toolArray = $tool->toArray();
-                $toolName = $toolArray['function']['name'] ?? 'unknown';
-                $toolDesc = $toolArray['function']['description'] ?? '';
-                $toolParams = $toolArray['function']['parameters'] ?? [];
-
-                $output->writeln("<fg=magenta>工具名称:</fg=magenta> {$toolName}");
-                $output->writeln("<fg=magenta>工具描述:</fg=magenta> {$toolDesc}");
-                $output->writeln("<fg=magenta>参数定义:</fg=magenta> " . json_encode($toolParams, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT));
-                $output->writeln('');
-            }
-        }
-
-        // 显示其他参数
-        $output->writeln('<fg=yellow;options=bold>========== 请求参数 ==========</>');
-        $output->writeln("<fg=yellow>模型:</fg=yellow> {$request->model}");
-        $output->writeln("<fg=yellow>温度:</fg=yellow> {$request->temperature}");
-        $output->writeln("<fg=yellow>最大tokens:</fg=yellow> {$request->maxTokens}");
-        if ($request->think !== null) {
-            $output->writeln("<fg=yellow>思考模式:</fg=yellow> {$request->think}");
-        }
-
-        $output->writeln('<fg=blue;options=bold>==========================================</>');
         $output->writeln('');
     }
 

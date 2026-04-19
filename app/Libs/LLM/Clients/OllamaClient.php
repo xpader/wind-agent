@@ -72,6 +72,13 @@ class OllamaClient implements LLMClient
         $httpRequest = $this->createRequest('POST', '/api/chat', $payload);
         $response = $this->httpClient->request($httpRequest);
 
+        // 检查 HTTP 状态码
+        $statusCode = $response->getStatus();
+        if ($statusCode < 200 || $statusCode >= 300) {
+            $errorBody = $response->getBody()->buffer();
+            $this->handleHttpError($statusCode, $errorBody, 'Ollama API');
+        }
+
         // 使用 trait 的流式处理方法
         $this->processStreamByChunk(
             $response->getBody(),
@@ -83,13 +90,6 @@ class OllamaClient implements LLMClient
                     return !$response->done;
                 }
                 return true;
-            },
-            function($buffer) use ($callback, $request) {
-                $data = $this->safeJsonDecode($buffer);
-                if ($data !== null) {
-                    $response = $this->parseStreamChunk($data, $request->model);
-                    $callback($response);
-                }
             }
         );
     }

@@ -52,8 +52,13 @@ class ExecTool implements ToolInterface
             throw new \RuntimeException('禁止删除文件');
         }
 
-        // 基本的安全检查
-        if (preg_match('/[;&|`$()]/', $command)) {
+        // 基本的安全检查（允许 && 连续执行，但禁止 & 单独使用和其他危险字符）
+        // 检查单独的 &（不允许后台执行）
+        if (preg_match('/(?<!&)&(?!&)/', $command)) {
+            throw new \RuntimeException('命令包含不安全的字符');
+        }
+        // 检查其他危险字符
+        if (preg_match('/[;|`$()]/', $command)) {
             throw new \RuntimeException('命令包含不安全的字符');
         }
 

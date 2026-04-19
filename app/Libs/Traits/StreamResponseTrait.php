@@ -78,12 +78,14 @@ trait StreamResponseTrait
     /**
      * 处理流式响应（支持逐块读取）
      *
+     * 自动处理不完整的行，确保 lineProcessor 每次接收到的都是完整的行
+     *
      * @param mixed $streamBody 响应体对象
      * @param callable $lineProcessor 行处理回调 function(string $line): bool
-     * @param callable $finalHandler 最终处理回调 function(string $buffer): void
+     *                              返回 false 可提前终止流式处理
      * @return void
      */
-    protected function processStreamByChunk($streamBody, callable $lineProcessor, callable $finalHandler): void
+    protected function processStreamByChunk($streamBody, callable $lineProcessor): void
     {
         $buffer = '';
 
@@ -98,7 +100,6 @@ trait StreamResponseTrait
 
             // 处理完整的行
             foreach ($lines as $line) {
-                // 使用 $line !== '' 而不是 !empty(trim($line))，避免 "0" 被当作空值
                 if ($line !== '') {
                     $continue = $lineProcessor($line);
                     if ($continue === false) {
@@ -108,9 +109,9 @@ trait StreamResponseTrait
             }
         }
 
-        // 处理最后的缓冲区内容
+        // 处理最后一行（即使没有换行符）
         if ($buffer !== '') {
-            $finalHandler($buffer);
+            $lineProcessor($buffer);
         }
     }
 

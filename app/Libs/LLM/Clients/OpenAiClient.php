@@ -74,6 +74,13 @@ class OpenAiClient implements LLMClient
         $httpRequest = $this->createRequest('POST', '/chat/completions', $payload);
         $response = $this->httpClient->request($httpRequest);
 
+        // 检查 HTTP 状态码
+        $statusCode = $response->getStatus();
+        if ($statusCode < 200 || $statusCode >= 300) {
+            $errorBody = $response->getBody()->buffer();
+            $this->handleHttpError($statusCode, $errorBody, 'OpenAI API');
+        }
+
         // 累积完整的 tool_calls（处理 MiniMax 等平台的分片情况）
         $accumulatedToolCalls = [];
         $accumulatedContent = '';
@@ -103,8 +110,8 @@ class OpenAiClient implements LLMClient
                         }
 
                         // 累积思考过程
-                        if (isset($delta['thinking']) && $delta['thinking'] !== '') {
-                            $accumulatedThinking .= $delta['thinking'];
+                        if (isset($delta['reasoning_content']) && $delta['reasoning_content'] !== '') {
+                            $accumulatedThinking .= $delta['reasoning_content'];
                         }
 
                         // 记录模型名称
@@ -194,16 +201,6 @@ class OpenAiClient implements LLMClient
                     }
                 }
                 return true;
-            },
-            function($buffer) use ($callback) {
-                $line = trim($buffer);
-                if ($line !== '' && $line !== 'data: [DONE]' && str_starts_with($line, 'data: ')) {
-                    $data = $this->safeJsonDecode(substr($line, 6));
-                    if ($data !== null) {
-                        $response = $this->parseStreamChunk($data);
-                        $callback($response);
-                    }
-                }
             }
         );
 
@@ -308,14 +305,14 @@ class OpenAiClient implements LLMClient
     /**
      * 解析聊天补全响应
      */
-    private function parseChatResponse(array $data): LLMResponse
+    protected function parseChatResponse(array $data): LLMResponse
     {
         $choice = $data['choices'][0];
         $message = $choice['message'];
 
         $response = LLMResponse::create()
             ->content($message['content'] ?? '')
-            ->thinking($message['thinking'] ?? '')
+            ->thinking($message['reasoning_content'] ?? '')
             ->model($data['model'] ?? '')
             ->done(true)
             ->finishReason($choice['finish_reason'] ?? '')
@@ -341,14 +338,14 @@ class OpenAiClient implements LLMClient
     /**
      * 解析流式响应片段
      */
-    private function parseStreamChunk(array $data): LLMResponse
+    protected function parseStreamChunk(array $data): LLMResponse
     {
         $choice = $data['choices'][0];
         $delta = $choice['delta'];
 
         $chunk = LLMResponse::createChunk(
             $delta['content'] ?? '',
-            $delta['thinking'] ?? '',
+            $delta['reasoning_content'] ?? '',
             ($choice['finish_reason'] ?? null) !== null
         )->model($data['model'] ?? '');
 
