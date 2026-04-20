@@ -278,15 +278,27 @@ class OllamaClient implements LLMClient
      */
     private function parseStreamChunk(array $data, string $model): LLMResponse
     {
+        $isDone = $data['done'] ?? false;
         $response = LLMResponse::createChunk(
             $data['message']['content'] ?? '',
             $data['message']['thinking'] ?? '',
-            $data['done'] ?? false
+            $isDone
         )->model($data['model'] ?? $model);
 
         // 处理工具调用（流式响应中也可能包含）
         if (isset($data['message']['tool_calls']) && is_array($data['message']['tool_calls'])) {
             $response->toolCalls = $data['message']['tool_calls'];
+        }
+
+        // 当流式响应完成时，设置 usage 信息
+        if ($isDone) {
+            if (isset($data['prompt_eval_count']) || isset($data['eval_count'])) {
+                $response->usage(new TokenUsage(
+                    $data['prompt_eval_count'] ?? 0,
+                    $data['eval_count'] ?? 0,
+                    ($data['prompt_eval_count'] ?? 0) + ($data['eval_count'] ?? 0)
+                ));
+            }
         }
 
         return $response;

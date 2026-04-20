@@ -2,315 +2,137 @@
 
 namespace App\Libs\LLM\Clients;
 
-use Amp\Http\Client\HttpClient;
-use Amp\Http\Client\Request;
 use App\Libs\LLM\LLMRequest;
 use App\Libs\LLM\LLMResponse;
-use App\Libs\LLM\TokenUsage;
-use App\Libs\Traits\HttpRequestTrait;
 
 /**
- * MiniMax TokenPlan 客户端
+ * MiniMax 客户端
  *
  * 基于 OpenAI 兼容接口，支持 MiniMax 的特殊思考内容格式
- * 思考内容嵌入在响应的 `<think>...</think>` 标签中
+ * 思考内容嵌入在响应的 `
+
+` 标签中
  */
 class MiniMaxClient extends OpenAiClient
 {
-    use HttpRequestTrait;
-
-    private HttpClient $httpClient;
-    private string $apiKey;
-    private string $baseUrl;
-    private int $timeout;
-
-    public function __construct(
-        HttpClient $httpClient,
-        string $apiKey,
-        string $baseUrl = 'https://api.minimax.chat/v1',
-        int $timeout = 60
-    ) {
-        parent::__construct(
-            $httpClient,
-            $apiKey,
-            $baseUrl,
-            '',
-            [],
-            $timeout
-        );
-        $this->httpClient = $httpClient;
-        $this->apiKey = $apiKey;
-        $this->baseUrl = rtrim($baseUrl, '/');
-        $this->timeout = $timeout;
-    }
-
     /**
-     * 发送 HTTP 请求
-     */
-    protected function request(string $method, string $path, ?array $body = null): string
-    {
-        $request = $this->createMiniMaxRequest($method, '/text/chatcompletion_v2', $body);
-        $response = $this->httpClient->request($request);
-
-        $statusCode = $response->getStatus();
-        if ($statusCode < 200 || $statusCode >= 300) {
-            $errorBody = $response->getBody()->buffer();
-            $this->handleHttpError($statusCode, $errorBody, 'MiniMax API');
-        }
-
-        return $response->getBody()->buffer();
-    }
-
-    /**
-     * 创建 HTTP 请求对象
-     */
-    private function createMiniMaxRequest(string $method, string $path, ?array $body = null): Request
-    {
-        $url = $this->baseUrl . $path;
-        $request = new Request($url, $method);
-
-        $this->setTimeouts($request, $this->timeout);
-
-        $request->setHeader('Authorization', 'Bearer ' . $this->apiKey);
-        $request->setHeader('Content-Type', 'application/json');
-
-        if ($body !== null) {
-            $request->setBody(json_encode($body));
-        }
-
-        return $request;
-    }
-
-    /**
-     * 创建聊天补全请求
-     */
-    public function chat(LLMRequest $request): LLMResponse
-    {
-        $payload = $request->toArray();
-        $response = $this->request('POST', '/text/chatcompletion_v2', $payload);
-        $data = $this->safeJsonDecode($response);
-
-        return $this->parseChatResponse($data);
-    }
-
-    /**
-     * 创建聊天补全请求（流式）
+     * 重写 chatStream 方法以处理流式思考标签和 MiniMax 特殊的 usage 块
      */
     public function chatStream(LLMRequest $request, callable $callback): void
     {
-        $payload = $request->toArray();
-        $payload['stream'] = true;
+        // 添加 stream_options 参数以获取 usage 信息
+        $request->parameters['stream_options'] = ['include_usage' => true];
 
-        $httpRequest = $this->createMiniMaxRequest('POST', '/text/chatcompletion_v2', $payload);
-        $httpResponse = $this->httpClient->request($httpRequest);
+        // MiniMax 特殊处理：如果传了 include_usage 参数，使用是否有 usage 来判断是否真正完成
+        // 因为 MiniMax 在 finish_reason: stop 后还会发送一个包含 usage 的数据块
+        $isDoneCallback = function(array $data): bool {
+            return isset($data['usage']) && $data['usage'] !== null;
+        };
 
-        // 检查 HTTP 状态码
-        $statusCode = $httpResponse->getStatus();
-        if ($statusCode < 200 || $statusCode >= 300) {
-            $errorBody = $httpResponse->getBody()->buffer();
-            $this->handleHttpError($statusCode, $errorBody, 'MiniMax API');
-        }
+        $inThinking = false;
+        $thinkOpen = '<think>';      // 开始标签 < think>
+        $thinkClose = '</think>';     // 结束标签 </think>
 
-        // 检查 Content-Type，如果不是 text/event-stream，说明是错误响应
-        $contentType = $httpResponse->getHeader('content-type') ?? '';
-        if (strpos($contentType, 'text/event-stream') === false) {
-            // 不是流式响应，可能是错误响应
-            $body = $httpResponse->getBody()->buffer();
-            $data = $this->safeJsonDecode($body);
-            if ($data !== null) {
-                $this->checkMiniMaxError($data);
+        $this->sendChatStream($request, function(LLMResponse $response) use ($callback, &$inThinking, $thinkOpen, $thinkClose) {
+            if ($response->content === '') {
+                $callback($response);
+                return;
             }
-            return; // 没有错误但也不是流式响应，直接返回
-        }
 
-        $accumulatedContent = '';
-        $accumulatedThinking = '';
-        $accumulatedToolCalls = [];
-        $lastModel = '';
+            $content = $response->content;
+            $newContent = '';
+            $newThinking = '';
 
-        $this->processStreamByChunk(
-            $httpResponse->getBody(),
-            function($line) use ($callback, &$accumulatedContent, &$accumulatedThinking, &$accumulatedToolCalls, &$lastModel) {
-                $line = trim($line);
-                if ($line === '' || $line === 'data: [DONE]') {
-                    return true;
-                }
+            if (!$inThinking) {
+                // 不在思考模式中，查找开始标签
+                $openPos = strpos($content, $thinkOpen);
+                if ($openPos !== false) {
+                    // 找到开始标签，标签后的内容可能有思考内容、结束标签、普通内容
+                    $remaining = substr($content, $openPos + strlen($thinkOpen));
 
-                if (str_starts_with($line, 'data: ')) {
-                    $data = $this->safeJsonDecode(substr($line, 6));
-                    if ($data !== null) {
-                        $choice = $data['choices'][0];
-                        $delta = $choice['delta'] ?? [];
-                        $finishReason = $choice['finish_reason'] ?? null;
-
-                        if (isset($delta['content']) && $delta['content'] !== '') {
-                            $accumulatedContent .= $delta['content'];
-                        }
-
-                        // MiniMax 使用 reasoning_content 字段
-                        if (isset($delta['reasoning_content']) && $delta['reasoning_content'] !== '') {
-                            $accumulatedThinking .= $delta['reasoning_content'];
-                        }
-
-                        if (isset($data['model'])) {
-                            $lastModel = $data['model'];
-                        }
-
-                        if (isset($delta['tool_calls']) && is_array($delta['tool_calls'])) {
-                            foreach ($delta['tool_calls'] as $toolCall) {
-                                $index = $toolCall['index'] ?? 0;
-                                if (!isset($accumulatedToolCalls[$index])) {
-                                    $accumulatedToolCalls[$index] = [
-                                        'id' => '',
-                                        'type' => 'function',
-                                        'function' => [
-                                            'name' => '',
-                                            'arguments' => ''
-                                        ]
-                                    ];
-                                }
-
-                                if (isset($toolCall['id'])) {
-                                    $accumulatedToolCalls[$index]['id'] = $toolCall['id'];
-                                }
-                                if (isset($toolCall['function']['name'])) {
-                                    $accumulatedToolCalls[$index]['function']['name'] = $toolCall['function']['name'];
-                                }
-                                if (isset($toolCall['function']['arguments'])) {
-                                    $accumulatedToolCalls[$index]['function']['arguments'] .= $toolCall['function']['arguments'];
-                                }
-                            }
-                        }
-
-                        $isDone = $finishReason !== null;
-                        if ($isDone) {
-                            $completeToolCalls = [];
-                            foreach ($accumulatedToolCalls as $toolCall) {
-                                if ($toolCall['function']['name'] !== '' && $toolCall['id'] !== '') {
-                                    $completeToolCalls[] = $toolCall;
-                                }
-                            }
-
-                            $response = LLMResponse::createChunk(
-                                $accumulatedContent,
-                                $accumulatedThinking,
-                                true
-                            )->model($lastModel);
-
-                            if (count($completeToolCalls) > 0) {
-                                $response->toolCalls($completeToolCalls);
-                            }
-
-                            $callback($response);
-
-                            $accumulatedContent = '';
-                            $accumulatedThinking = '';
-                            $accumulatedToolCalls = [];
-
-                            return false;
-                        } elseif ($accumulatedContent !== '' || $accumulatedThinking !== '') {
-                            $response = LLMResponse::createChunk(
-                                $accumulatedContent,
-                                $accumulatedThinking,
-                                false
-                            )->model($lastModel);
-                            $callback($response);
-
-                            $accumulatedContent = '';
-                            $accumulatedThinking = '';
-                        }
+                    // 查找结束标签
+                    $closePos = strpos($remaining, $thinkClose);
+                    if ($closePos !== false) {
+                        // 一次性包含：开始标签 + 思考内容 + 结束标签 + 普通内容
+                        $newThinking = substr($remaining, 0, $closePos);
+                        $newContent = substr($remaining, $closePos + strlen($thinkClose));
+                        // 不需要进入思考模式，因为已经结束了
+                    } else {
+                        // 只有开始标签 + 思考内容，进入思考模式
+                        $newThinking = $remaining;
+                        $inThinking = true;
                     }
+                } else {
+                    // 没有开始标签，全部都是普通内容
+                    $newContent = $content;
                 }
-                return true;
-            }
-        );
-
-        $callback(LLMResponse::createChunk('', '', true));
-    }
-
-    /**
-     * 解析流式响应片段
-     */
-    protected function parseStreamChunk(array $data): LLMResponse
-    {
-        $choice = $data['choices'][0];
-        $delta = $choice['delta'] ?? [];
-
-        // MiniMax 使用 reasoning_content 字段
-        $thinking = $delta['reasoning_content'] ?? '';
-
-        $chunk = LLMResponse::createChunk(
-            $delta['content'] ?? '',
-            $thinking,
-            ($choice['finish_reason'] ?? null) !== null
-        )->model($data['model'] ?? '');
-
-        if (isset($delta['tool_calls']) && is_array($delta['tool_calls'])) {
-            $chunk->toolCalls($delta['tool_calls']);
-        }
-
-        return $chunk;
-    }
-
-    /**
-     * 解析聊天补全响应，提取 think 标签中的思考内容
-     */
-    /**
-     * 检查 MiniMax API 响应错误
-     *
-     * @param array $data 响应数据
-     * @throws \RuntimeException 当响应包含错误时
-     */
-    protected function checkMiniMaxError(array $data): void
-    {
-        if (!isset($data['choices'])) {
-            // 检查 MiniMax API 错误响应
-            if (isset($data['base_resp'])) {
-                $baseResp = $data['base_resp'];
-                $statusCode = $baseResp['status_code'] ?? null;
-                if ($statusCode !== null && $statusCode !== 0) {
-                    $statusMsg = $baseResp['status_msg'] ?? 'Unknown error';
-                    throw new \RuntimeException("MiniMax API error ({$statusCode}): {$statusMsg}");
+            } else {
+                // 在思考模式中，查找结束标签
+                $closePos = strpos($content, $thinkClose);
+                if ($closePos !== false) {
+                    // 找到结束标签，标签前的内容是思考内容，标签后的是普通内容
+                    $newThinking = substr($content, 0, $closePos);
+                    $newContent = substr($content, $closePos + strlen($thinkClose));
+                    $inThinking = false;
+                } else {
+                    // 还没找到结束标签，全部都是思考内容
+                    $newThinking = $content;
                 }
             }
-            throw new \RuntimeException('Invalid MiniMax response: missing choices');
-        }
 
-        if (!isset($data['choices'][0])) {
-            throw new \RuntimeException('Invalid MiniMax response: missing choices[0]');
-        }
+            $newResponse = LLMResponse::createChunk($newContent, $newThinking, $response->done)
+                ->model($response->model);
+
+            if ($response->usage !== null) {
+                $newResponse->usage($response->usage);
+            }
+
+            $callback($newResponse);
+        }, $isDoneCallback);
     }
 
+    /**
+     * 提取思考内容（从 think 标签中）- 用于非流式响应
+     */
+    private function extractThinking(string $content): string
+    {
+        $thinkOpen = '<think>';
+        $thinkClose = '</think>';
+
+        if (preg_match('/' . preg_quote($thinkOpen, '/') . '(.*?)' . preg_quote($thinkClose, '/') . '/s', $content, $matches)) {
+            return trim($matches[1]);
+        }
+        return '';
+    }
+
+    /**
+     * 移除思考标签（从内容中删除 think 标签）- 用于非流式响应
+     */
+    private function stripThinkingTags(string $content): string
+    {
+        $thinkOpen = '<think>';
+        $thinkClose = '</think>';
+
+        $result = preg_replace('/' . preg_quote($thinkOpen, '/') . '.*?' . preg_quote($thinkClose, '/') . '/s', '', $content);
+        return $result ?? '';
+    }
+
+    /**
+     * 解析聊天补全响应（重写以处理思考标签）- 用于非流式响应
+     */
     protected function parseChatResponse(array $data): LLMResponse
     {
-        $this->checkMiniMaxError($data);
+        $response = parent::parseChatResponse($data);
 
-        $choice = $data['choices'][0];
-        $message = $choice['message'] ?? [];
-
-        $content = $message['content'] ?? '';
-        // MiniMax-M2.7 模型思考内容在 reasoning_content 字段
-        $thinking = $message['reasoning_content'] ?? '';
-
-        $response = LLMResponse::create()
-            ->content($content)
-            ->thinking($thinking)
-            ->model($data['model'] ?? '')
-            ->done(true)
-            ->finishReason($choice['finish_reason'] ?? '')
-            ->raw($data);
-
-        if (isset($message['tool_calls']) && is_array($message['tool_calls'])) {
-            $response->toolCalls($message['tool_calls']);
+        // 提取思考内容
+        $thinking = $this->extractThinking($response->content);
+        if ($thinking !== '') {
+            $response->thinking($thinking);
         }
 
-        if (isset($data['usage'])) {
-            $response->usage(new TokenUsage(
-                $data['usage']['prompt_tokens'] ?? 0,
-                $data['usage']['completion_tokens'] ?? 0,
-                $data['usage']['total_tokens'] ?? 0
-            ));
-        }
+        // 移除思考标签后的内容
+        $content = $this->stripThinkingTags($response->content);
+        $response->content($content);
 
         return $response;
     }

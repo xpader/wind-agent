@@ -2,6 +2,8 @@
 
 namespace App\Libs\Traits;
 
+use function Amp\delay;
+
 /**
  * 流式响应处理 Trait
  *
@@ -105,7 +107,7 @@ trait StreamResponseTrait
                 if ($line !== '') {
                     $continue = $lineProcessor($line);
                     if ($continue === false) {
-                        return; // 提前终止
+                        return;
                     }
                 }
             }

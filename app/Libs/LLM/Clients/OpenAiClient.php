@@ -68,6 +68,25 @@ class OpenAiClient implements LLMClient
      */
     public function chatStream(LLMRequest $request, callable $callback): void
     {
+        // 默认的完成判断：使用 finish_reason
+        $isDoneCallback = function(array $data): bool {
+            $choice = $data['choices'][0] ?? [];
+            return ($choice['finish_reason'] ?? null) !== null;
+        };
+
+        $this->sendChatStream($request, $callback, $isDoneCallback);
+    }
+
+    /**
+     * 发送流式聊天请求（内部方法）
+     *
+     * @param LLMRequest $request 请求对象
+     * @param callable $callback 接收流式数据的回调 function(LLMResponse $response)
+     * @param callable $isDoneCallback 判断流是否完成的回调 function(array $data): bool
+     * @return void
+     */
+    protected function sendChatStream(LLMRequest $request, callable $callback, callable $isDoneCallback): void
+    {
         $payload = $request->toArray();
         $payload['stream'] = true;
 
@@ -91,7 +110,7 @@ class OpenAiClient implements LLMClient
         // 使用 trait 的流式处理方法
         $this->processStreamByChunk(
             $response->getBody(),
-            function($line) use ($callback, $request, &$accumulatedToolCalls, &$accumulatedContent, &$accumulatedThinking, &$lastModel, &$hasIncompleteToolCalls) {
+            function($line) use ($callback, $request, &$accumulatedToolCalls, &$accumulatedContent, &$accumulatedThinking, &$lastModel, &$hasIncompleteToolCalls, $isDoneCallback) {
                 $line = trim($line);
                 if ($line === '' || $line === 'data: [DONE]') {
                     return true;
@@ -100,8 +119,8 @@ class OpenAiClient implements LLMClient
                 if (str_starts_with($line, 'data: ')) {
                     $data = $this->safeJsonDecode(substr($line, 6));
                     if ($data !== null) {
-                        $choice = $data['choices'][0];
-                        $delta = $choice['delta'];
+                        $choice = $data['choices'][0] ?? [];
+                        $delta = $choice['delta'] ?? [];
                         $finishReason = $choice['finish_reason'] ?? null;
 
                         // 累积内容
@@ -155,8 +174,8 @@ class OpenAiClient implements LLMClient
                             }
                         }
 
-                        // 只有在完成时才触发回调
-                        $isDone = $finishReason !== null;
+                        // 判断是否完成
+                        $isDone = $isDoneCallback($data);
                         if ($isDone) {
                             // 验证并组装完整的 tool_calls
                             $completeToolCalls = [];
@@ -174,6 +193,15 @@ class OpenAiClient implements LLMClient
 
                             if (count($completeToolCalls) > 0) {
                                 $response->toolCalls($completeToolCalls);
+                            }
+
+                            // 设置 usage 信息（流式响应在完成时会包含 usage）
+                            if (isset($data['usage'])) {
+                                $response->usage(new \App\Libs\LLM\TokenUsage(
+                                    $data['usage']['prompt_tokens'] ?? 0,
+                                    $data['usage']['completion_tokens'] ?? 0,
+                                    $data['usage']['total_tokens'] ?? 0
+                                ));
                             }
 
                             $callback($response);

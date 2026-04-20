@@ -18,8 +18,8 @@ class Skill
     /** 许可证 (可选) */
     public ?string $license = null;
 
-    /** 元数据 (可选) */
-    public array $metadata = [];
+    /** 元数据 (可选，支持 string|array|mixed) */
+    public mixed $metadata = null;
 
     /** SKILL.md 完整内容 */
     public string $content = '';
@@ -51,20 +51,37 @@ class Skill
             throw new \InvalidArgumentException("Failed to read SKILL.md: {$skillFile}");
         }
 
-        // 解析 YAML front matter
-        if (!str_starts_with($content, '---')) {
-            throw new \InvalidArgumentException("SKILL.md must start with YAML front matter (---): {$skillFile}");
+        $metadata = null;
+        $markdownPart = '';
+
+        // 尝试解析 JSON 格式（单行）
+        $firstLine = strstr($content, "\n", true) ?: $content;
+        if (str_starts_with(trim($firstLine), '{') && str_ends_with(trim($firstLine), '}')) {
+            // JSON 格式
+            $jsonMetadata = trim($firstLine);
+            $newlinePos = strpos($content, "\n");
+            $markdownPart = $newlinePos !== false ? substr($content, $newlinePos + 1) : '';
+
+            $metadata = json_decode($jsonMetadata, true);
+            if ($metadata === null && json_last_error() !== JSON_ERROR_NONE) {
+                throw new \InvalidArgumentException("Invalid JSON metadata in SKILL.md: " . json_last_error_msg() . " - {$skillFile}");
+            }
+        } else {
+            // YAML front matter 格式
+            if (!str_starts_with($content, '---')) {
+                throw new \InvalidArgumentException("SKILL.md must start with YAML front matter (---) or JSON metadata: {$skillFile}");
+            }
+
+            $endPos = strpos($content, "\n---", 3);
+            if ($endPos === false) {
+                throw new \InvalidArgumentException("YAML front matter not closed (---): {$skillFile}");
+            }
+
+            $yamlPart = substr($content, 3, $endPos - 3);
+            $markdownPart = substr($content, $endPos + 4);
+
+            $metadata = self::parseYaml($yamlPart);
         }
-
-        $endPos = strpos($content, "\n---", 3);
-        if ($endPos === false) {
-            throw new \InvalidArgumentException("YAML front matter not closed (---): {$skillFile}");
-        }
-
-        $yamlPart = substr($content, 3, $endPos - 3);
-        $markdownPart = substr($content, $endPos + 4);
-
-        $metadata = self::parseYaml($yamlPart);
 
         // 验证必需字段
         if (empty($metadata['name'])) {
@@ -88,7 +105,7 @@ class Skill
         $config->name = $metadata['name'];
         $config->description = $metadata['description'];
         $config->license = $metadata['license'] ?? null;
-        $config->metadata = $metadata['metadata'] ?? [];
+        $config->metadata = $metadata['metadata'] ?? null;
         $config->content = trim($markdownPart);
         $config->directory = $skillDirectory;
 
@@ -243,14 +260,22 @@ class Skill
             $metadata .= "license: {$this->license}\n";
         }
 
-        if (!empty($this->metadata)) {
-            $metadata .= "metadata:\n";
-            foreach ($this->metadata as $key => $value) {
-                if (is_array($value)) {
-                    $metadata .= "  {$key}: " . json_encode($value, JSON_UNESCAPED_UNICODE) . "\n";
-                } else {
-                    $metadata .= "  {$key}: {$value}\n";
+        if ($this->metadata !== null) {
+            if (is_string($this->metadata)) {
+                // 如果 metadata 是字符串，直接作为一行 JSON 添加
+                $metadata .= "metadata: {$this->metadata}\n";
+            } elseif (is_array($this->metadata)) {
+                $metadata .= "metadata:\n";
+                foreach ($this->metadata as $key => $value) {
+                    if (is_array($value)) {
+                        $metadata .= "  {$key}: " . json_encode($value, JSON_UNESCAPED_UNICODE) . "\n";
+                    } else {
+                        $metadata .= "  {$key}: {$value}\n";
+                    }
                 }
+            } else {
+                // 其他类型，转换为 JSON 字符串
+                $metadata .= "metadata: " . json_encode($this->metadata, JSON_UNESCAPED_UNICODE) . "\n";
             }
         }
 

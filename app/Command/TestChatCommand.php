@@ -119,7 +119,6 @@ class TestChatCommand extends Command
         }
 
         if ($type === 'minimax') {
-            // MiniMax TokenPlan 使用专用客户端
             $apiKey = config('llm.providers.minimax.api_key');
             if (!$apiKey) {
                 throw new \RuntimeException('MiniMax API Key 未设置，请在 .env 中设置 MINIMAX_API_KEY');

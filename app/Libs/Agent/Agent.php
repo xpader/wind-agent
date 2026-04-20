@@ -42,6 +42,9 @@ class Agent
     /** 消息历史 */
     private array $messages = [];
 
+    /** 最后一次请求的 total tokens */
+    private int $lastTotalTokens = 0;
+
     /** Skill 管理器 */
     private ?SkillManager $skillManager = null;
 
@@ -143,6 +146,11 @@ class Agent
             // 获取响应
             $response = $this->provider->chat($request);
 
+            // 记录最后一次请求的 total tokens
+            if ($response->usage !== null) {
+                $this->lastTotalTokens = $response->usage->totalTokens;
+            }
+
             // 如果没有工具调用，结束对话
             if (!$response->hasToolCalls()) {
                 // 添加最终助手响应到消息历史
@@ -211,10 +219,11 @@ class Agent
             $fullContent = '';
             $fullThinking = '';
             $allToolCalls = [];
+            $lastUsage = null;
 
             // 流式获取响应
             $this->provider->chatStream($request, function(LLMResponse $response)
-                use ($callback, &$fullContent, &$fullThinking, &$allToolCalls) {
+                use ($callback, &$fullContent, &$fullThinking, &$allToolCalls, &$lastUsage) {
 
                 // 收集内容
                 if ($response->content !== '') {
@@ -231,6 +240,11 @@ class Agent
                     $allToolCalls = array_merge($allToolCalls, $response->toolCalls);
                 }
 
+                // 收集 usage 信息
+                if ($response->usage !== null) {
+                    $lastUsage = $response->usage;
+                }
+
                 // 调用用户回调
                 $callback($response, []);
             });
@@ -242,6 +256,16 @@ class Agent
                 ->model($this->model)
                 ->done(true)
                 ->toolCalls($allToolCalls);
+
+            // 设置 usage 信息
+            if ($lastUsage !== null) {
+                $finalResponse->usage($lastUsage);
+            }
+
+            // 记录最后一次请求的 total tokens
+            if ($finalResponse->usage !== null) {
+                $this->lastTotalTokens = $finalResponse->usage->totalTokens;
+            }
 
             // 如果没有工具调用，结束对话
             if (!$finalResponse->hasToolCalls()) {
@@ -361,5 +385,17 @@ class Agent
     public function getMessages(): array
     {
         return $this->messages;
+    }
+
+    /**
+     * 获取当前对话的总 token 数量
+     *
+     * 从最后一次响应中获取 total_tokens，代表当前整个请求（上下文 + 生成）的 token 总量
+     *
+     * @return int 当前对话的 token 总数
+     */
+    public function getTotalTokens(): int
+    {
+        return $this->lastTotalTokens;
     }
 }

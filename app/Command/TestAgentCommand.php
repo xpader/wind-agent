@@ -26,15 +26,16 @@ class TestAgentCommand extends Command
     protected function configure()
     {
         $this->setName('test:agent')
-            ->setDescription('测试 Agent 类功能（支持多轮交互式对话）')
+            ->setDescription('测试 Agent 类功能')
             ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek)', 'ollama')
             ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '172.19.208.203:11434')
             ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:9b-q8_0')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '系统提示词', '你是一个专业的 AI 助手，可以帮助用户解决各种问题。')
-            ->addOption('message', null, InputOption::VALUE_OPTIONAL, '初始用户消息（可选，未指定则直接进入交互模式）')
+            ->addOption('message', null, InputOption::VALUE_OPTIONAL, '用户消息')
             ->addOption('max-tokens', null, InputOption::VALUE_OPTIONAL, '最大 token 数', '32768')
             ->addOption('temperature', 't', InputOption::VALUE_OPTIONAL, '温度参数 (0-2)', '0.7')
             ->addOption('stream', 's', InputOption::VALUE_NONE, '使用流式输出')
+            ->addOption('interactive', 'i', InputOption::VALUE_NONE, '启用交互式多轮对话模式')
             ->addOption('think', null, InputOption::VALUE_OPTIONAL, '启用思考模式 (true/false/high/medium/low)')
             ->addOption('with-tools', null, InputOption::VALUE_NONE, '启用工具调用')
             ->addOption('with-skills', null, InputOption::VALUE_NONE, '启用技能支持')
@@ -68,28 +69,28 @@ class TestAgentCommand extends Command
         $this->displayHeader($output, $config);
 
         try {
-            // 如果没有提供初始消息，直接进入交互模式
-            if ($config['userMessage'] === null) {
-                $output->writeln('<fg=yellow;options=bold>进入交互模式 (Ctrl+C 退出)</>');
-                $output->writeln('');
-            } else {
-                // 执行初始对话
+            // 如果提供了消息，执行对话
+            if ($config['userMessage']) {
+                // 执行对话
                 if ($config['useStream']) {
-                    $this->executeStreamChat($agent, $config, $output);
+                    $response = $this->executeStreamChat($agent, $config, $output);
+                    // 显示响应详情（包含累计 Token）
+                    $this->displayResponseDetails($response, $config, $output, $agent);
                 } else {
                     $response = $this->executeNormalChat($agent, $config, $output);
-                    // 显示响应详情
-                    $this->displayResponseDetails($response, $config, $output);
+                    // 显示响应详情（包含累计 Token）
+                    $this->displayResponseDetails($response, $config, $output, $agent);
                 }
 
-                $output->writeln('<fg=green;options=bold>✅ 初始对话完成！</>');
-                $output->writeln('');
-                $output->writeln('<fg=yellow;options=bold>继续对话中... (Ctrl+C 退出)</>');
                 $output->writeln('');
             }
 
-            // 进入交互式多轮对话循环
-            $this->runInteractiveLoop($agent, $config, $input, $output);
+            // 判断是否进入交互模式：指定了 --interactive 或没有提供消息
+            if ($config['interactive'] || !$config['userMessage']) {
+                $output->writeln('<fg=yellow;options=bold>进入交互模式 (Ctrl+C 退出)</>');
+                $output->writeln('');
+                $this->runInteractiveLoop($agent, $config, $input, $output);
+            }
 
             return self::SUCCESS;
 
@@ -125,6 +126,7 @@ class TestAgentCommand extends Command
             'maxTokens' => (int) $input->getOption('max-tokens'),
             'temperature' => (float) $input->getOption('temperature'),
             'useStream' => $input->getOption('stream'),
+            'interactive' => $input->getOption('interactive'),
             'think' => $input->getOption('think'),
             'withTools' => $input->getOption('with-tools'),
             'withSkills' => $input->getOption('with-skills'),
@@ -407,28 +409,45 @@ class TestAgentCommand extends Command
     /**
      * 显示响应详情
      */
-    private function displayResponseDetails(LLMResponse $response, array $config, OutputInterface $output): void
+    private function displayResponseDetails(LLMResponse $response, array $config, OutputInterface $output, ?Agent $agent = null): void
     {
         $output->writeln('<fg=cyan;options=bold>========== 响应详情 ==========</>');
         $output->writeln("<info>模型:</info> {$response->model}");
-        $output->writeln("<info>完成状态:</info> " . ($response->done ? '是' : '否'));
-        $output->writeln("<info>响应长度:</info> {$response->getContentLength()} 字符");
-        $output->writeln("<info>工具调用数:</info> " . count($response->toolCalls));
 
-        if ($response->usage !== null) {
-            $output->writeln('');
-            $output->writeln('<fg=yellow;options=bold>---------- Token 使用情况 ----------</>');
-            $output->writeln("<info>提示词 Tokens:</info> {$response->usage->promptTokens}");
-            $output->writeln("<info>补全 Tokens:</info> {$response->usage->completionTokens}");
-            $output->writeln("<info>总 Tokens:</info> {$response->usage->totalTokens}");
-
-            $cost = $response->usage->getTotalCost($config['model']);
-            if ($cost > 0) {
-                $output->writeln("<info>估算成本:</info> $" . number_format($cost, 6));
-            }
+        // 显示上下文 Token 使用情况
+        if ($agent !== null) {
+            $totalTokens = $agent->getTotalTokens();
+            $contextLength = $this->estimateContextLimit($response->model);
+            $percentage = $totalTokens > 0 && $contextLength > 0 ? round(($totalTokens / $contextLength) * 100, 1) : 0;
+            $output->writeln("<info>上下文:</info> {$totalTokens}/{$contextLength} ({$percentage}%)");
         }
 
         $output->writeln('');
+    }
+
+    /**
+     * 估算模型的上下文长度
+     * 使用启发式方法根据模型名称判断
+     */
+    private function estimateContextLimit(string $model): int
+    {
+        // MiniMax M2.7 系列 - 200k
+        if (preg_match('/^MiniMax-M2\.7/i', $model)) {
+            return 200000;
+        }
+
+        // DeepSeek 系列 - 100k
+        if (preg_match('/^deepseek/i', $model)) {
+            return 100000;
+        }
+
+        // Qwen 3.5 小参数系列 - 64k
+        if (preg_match('/^qwen3\.5:(0\.8|4|9)b/i', $model)) {
+            return 64000;
+        }
+
+        // 默认值（保守估计）
+        return 32768;
     }
 
     /**
@@ -483,15 +502,15 @@ class TestAgentCommand extends Command
 
                 // 执行对话
                 if ($config['useStream']) {
-                    $this->executeStreamChat($agent, $config, $output, $userMessage);
+                    $response = $this->executeStreamChat($agent, $config, $output, $userMessage);
+                    // 显示响应详情（包含累计 Token）
+                    $this->displayResponseDetails($response, $config, $output, $agent);
                 } else {
                     $response = $this->executeNormalChat($agent, $config, $output, $userMessage);
-                    // 显示响应详情
-                    $this->displayResponseDetails($response, $config, $output);
+                    // 显示响应详情（包含累计 Token）
+                    $this->displayResponseDetails($response, $config, $output, $agent);
                 }
 
-                $output->writeln('');
-                $output->writeln('<fg=green;options=bold>✅ 响应完成！</>');
                 $output->writeln('');
 
             } catch (\Throwable $e) {
@@ -500,6 +519,17 @@ class TestAgentCommand extends Command
                 $output->writeln('');
             }
         }
+    }
+
+    /**
+     * 显示 token 使用情况
+     */
+    private function displayTokenUsage(Agent $agent, array $config, OutputInterface $output): void
+    {
+        $totalTokens = $agent->getTotalTokens();
+        $maxTokens = $config['maxTokens'];
+        $percentage = $totalTokens > 0 && $maxTokens > 0 ? round(($totalTokens / $maxTokens) * 100, 1) : 0;
+        $output->writeln("<fg=cyan;options=bold>📊 Token 使用: {$totalTokens}/{$maxTokens} ({$percentage}%)</>");
     }
 
     /**

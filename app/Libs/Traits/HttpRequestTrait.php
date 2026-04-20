@@ -150,11 +150,11 @@ trait HttpRequestTrait
      *
      * @param Request $request 请求对象
      * @param int $timeout 超时时间（秒）
-     * @param int $transferTimeout 传输超时时间（秒），默认60
+     * @param int $transferTimeout 传输超时时间（秒），默认120
      * @param int $inactivityTimeout 不活动超时时间（秒），默认60
      * @return void
      */
-    protected function setTimeouts(Request $request, int $timeout, int $transferTimeout = 60, int $inactivityTimeout = 60): void
+    protected function setTimeouts(Request $request, int $timeout, int $transferTimeout = 120, int $inactivityTimeout = 60): void
     {
         $request->setTcpConnectTimeout($timeout);
         $request->setTlsHandshakeTimeout($timeout);
