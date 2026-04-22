@@ -5,9 +5,7 @@ namespace App\Command;
 use App\Libs\Agent\Agent;
 use App\Libs\LLM\LLMClient;
 use App\Libs\LLM\LLMResponse;
-use App\Libs\LLM\Clients\OpenAiClient;
-use App\Libs\LLM\Clients\OllamaClient;
-use App\Libs\LLM\Clients\MiniMaxClient;
+use App\Libs\LLM\ClientFactory;
 use App\Libs\Agent\ToolManager;
 use Amp\Http\Client\HttpClientBuilder;
 use Symfony\Component\Console\Command\Command;
@@ -28,7 +26,7 @@ class TestAgentCommand extends Command
         $this->setName('test:agent')
             ->setDescription('测试 Agent 类功能')
             ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek)', 'ollama')
-            ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '172.19.208.203:11434')
+            ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '')
             ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:9b-q8_0')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '系统提示词', '你是一个专业的 AI 助手，可以帮助用户解决各种问题。')
             ->addOption('message', null, InputOption::VALUE_OPTIONAL, '用户消息')
@@ -105,21 +103,9 @@ class TestAgentCommand extends Command
      */
     private function parseConfig(InputInterface $input): array
     {
-        $clientType = $input->getOption('client');
-        $host = $input->getOption('host');
-
-        // 根据客户端类型设置正确的 host
-        if ($clientType === 'minimax') {
-            $host = 'https://api.minimaxi.com/v1'; // MiniMax 地址固定
-        }
-
-        if ($clientType === 'deepseek') {
-            $host = 'https://api.deepseek.com'; // DeepSeek 地址固定
-        }
-
         return [
-            'clientType' => $clientType,
-            'host' => $host,
+            'clientType' => $input->getOption('client'),
+            'host' => $input->getOption('host'),
             'model' => $input->getOption('model'),
             'systemPrompt' => $input->getOption('prompt'),
             'userMessage' => $input->getOption('message'),
@@ -141,50 +127,14 @@ class TestAgentCommand extends Command
     {
         $httpClient = HttpClientBuilder::buildDefault();
 
-        if ($type === 'openai') {
-            return new OpenAiClient(
-                httpClient: $httpClient,
-                apiKey: 'ollama',
-                baseUrl: "http://{$host}/v1",
-                timeout: 60
-            );
+        $options = ['timeout' => 60];
+
+        // 只有 ollama 才设置 base_url
+        if ($type === 'ollama') {
+            $options['base_url'] = $host !== '' ? $host : 'http://172.19.208.203:11434';
         }
 
-        if ($type === 'minimax') {
-            // MiniMax TokenPlan 使用专用客户端
-            $apiKey = config('llm.providers.minimax.api_key');
-            if (!$apiKey) {
-                throw new \RuntimeException('MiniMax API Key 未设置，请在 .env 中设置 MINIMAX_API_KEY');
-            }
-
-            return new MiniMaxClient(
-                httpClient: $httpClient,
-                apiKey: $apiKey,
-                baseUrl: $host,
-                timeout: 60
-            );
-        }
-
-        if ($type === 'deepseek') {
-            // DeepSeek 使用 OpenAI 兼容客户端
-            $apiKey = config('llm.providers.deepseek.api_key');
-            if (!$apiKey) {
-                throw new \RuntimeException('DeepSeek API Key 未设置，请在 .env 中设置 DEEPSEEK_API_KEY');
-            }
-
-            return new OpenAiClient(
-                httpClient: $httpClient,
-                apiKey: $apiKey,
-                baseUrl: $host,
-                timeout: 60
-            );
-        }
-
-        return new OllamaClient(
-            httpClient: $httpClient,
-            baseUrl: "http://{$host}",
-            timeout: 60
-        );
+        return ClientFactory::create($type, '', $httpClient, $options);
     }
 
     /**

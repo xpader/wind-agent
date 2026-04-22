@@ -15,6 +15,8 @@ use App\Libs\LLM\LLMResponse;
  */
 class MiniMaxClient extends OpenAiClient
 {
+    protected string $baseUrl = 'https://api.minimax.chat/v1';
+
     /**
      * 重写 chatStream 方法以处理流式思考标签和 MiniMax 特殊的 usage 块
      */

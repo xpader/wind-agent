@@ -21,24 +21,26 @@ use App\Libs\Traits\HttpRequestTrait;
 class OpenAiClient implements LLMClient
 {
     use StreamResponseTrait, HttpRequestTrait;
-    private HttpClient $httpClient;
-    private string $apiKey;
-    private string $baseUrl;
-    private string $organization;
-    private array $defaultOptions;
-    private int $timeout;
+    protected HttpClient $httpClient;
+    protected string $apiKey;
+    protected string $baseUrl = 'https://api.openai.com/v1';
+    protected string $organization;
+    protected array $defaultOptions;
+    protected int $timeout;
 
     public function __construct(
         HttpClient $httpClient,
         string $apiKey,
-        string $baseUrl = 'https://api.openai.com/v1',
+        string $baseUrl = '',
         string $organization = '',
         array $defaultOptions = [],
         int $timeout = 60
     ) {
         $this->httpClient = $httpClient;
         $this->apiKey = $apiKey;
-        $this->baseUrl = rtrim($baseUrl, '/');
+        if ($baseUrl !== '') {
+            $this->baseUrl = rtrim($baseUrl, '/');
+        }
         $this->organization = $organization;
         $this->defaultOptions = $defaultOptions;
         $this->timeout = $timeout;
