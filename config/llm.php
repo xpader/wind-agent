@@ -20,11 +20,27 @@ return [
         ],
 
         /**
+         * MiniMax Anthropic 兼容接口配置
+         */
+        'minimax-anthropic' => [
+            'api_key' => env('MINIMAX_API_KEY', ''),
+            'base_url' => 'https://api.minimaxi.com/anthropic',
+        ],
+
+        /**
          * DeepSeek 配置
          */
         'deepseek' => [
             'api_key' => env('DEEPSEEK_API_KEY', ''),
             'base_url' => 'https://api.deepseek.com',
+        ],
+
+        /**
+         * DeepSeek Anthropic 兼容接口配置
+         */
+        'deepseek-anthropic' => [
+            'api_key' => env('DEEPSEEK_API_KEY', ''),
+            'base_url' => 'https://api.deepseek.com/anthropic',
         ],
     ],
 

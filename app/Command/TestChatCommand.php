@@ -22,7 +22,7 @@ class TestChatCommand extends Command
     {
         $this->setName('test:chat')
             ->setDescription('聊天测试命令（支持多种 LLM 平台）')
-            ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek)', 'ollama')
+            ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek/anthropic/claude)', 'ollama')
             ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '')
             ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:9b-q8_0')
             ->addOption('system', 's', InputOption::VALUE_OPTIONAL, '系统提示词', '')
@@ -113,8 +113,12 @@ class TestChatCommand extends Command
         $clientNames = [
             'openai' => 'OpenAI 兼容客户端',
             'minimax' => 'MiniMax TokenPlan 客户端',
+            'minimax-anthropic' => 'MiniMax Anthropic 兼容客户端',
             'deepseek' => 'DeepSeek 客户端',
-            'ollama' => 'Ollama 原生客户端'
+            'deepseek-anthropic' => 'DeepSeek Anthropic 兼容客户端',
+            'ollama' => 'Ollama 原生客户端',
+            'anthropic' => 'Anthropic Claude 客户端',
+            'claude' => 'Anthropic Claude 客户端'
         ];
 
         $clientName = $clientNames[$config['clientType']] ?? '未知客户端';

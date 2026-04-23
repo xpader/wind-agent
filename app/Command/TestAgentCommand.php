@@ -25,7 +25,7 @@ class TestAgentCommand extends Command
     {
         $this->setName('test:agent')
             ->setDescription('测试 Agent 类功能')
-            ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek)', 'ollama')
+            ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek/anthropic/minimax-anthropic/deepseek-anthropic)', 'ollama')
             ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '')
             ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:9b-q8_0')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '系统提示词', '你是一个专业的 AI 助手，可以帮助用户解决各种问题。')
@@ -145,8 +145,12 @@ class TestAgentCommand extends Command
         $clientNames = [
             'openai' => 'OpenAI 兼容客户端',
             'minimax' => 'MiniMax TokenPlan 客户端',
+            'minimax-anthropic' => 'MiniMax Anthropic 兼容客户端',
             'deepseek' => 'DeepSeek 客户端',
-            'ollama' => 'Ollama 原生客户端'
+            'deepseek-anthropic' => 'DeepSeek Anthropic 兼容客户端',
+            'ollama' => 'Ollama 原生客户端',
+            'anthropic' => 'Anthropic Claude 客户端',
+            'claude' => 'Anthropic Claude 客户端'
         ];
 
         $clientName = $clientNames[$config['clientType']] ?? '未知客户端';
@@ -381,13 +385,18 @@ class TestAgentCommand extends Command
      */
     private function estimateContextLimit(string $model): int
     {
-        // MiniMax M2.7 系列 - 200k
-        if (preg_match('/^MiniMax-M2\.7/i', $model)) {
+        // Anthropic Claude 系列 - 200k
+        if (preg_match('/claude-3/i', $model)) {
             return 200000;
         }
 
-        // DeepSeek 系列 - 100k
-        if (preg_match('/^deepseek/i', $model)) {
+        // MiniMax 系列 - 200k
+        if (preg_match('/MiniMax-M2\.7/i', $model) || preg_match('/abab6/i', $model)) {
+            return 200000;
+        }
+
+        // DeepSeek 系列 - 100k+
+        if (preg_match('/deepseek/i', $model)) {
             return 100000;
         }
 

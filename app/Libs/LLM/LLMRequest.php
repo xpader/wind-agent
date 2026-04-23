@@ -190,7 +190,19 @@ class LLMRequest
     public function __call(string $name, array $arguments)
     {
         if (property_exists($this, $name)) {
-            $this->$name = $arguments[0] ?? null;
+            $value = $arguments[0] ?? null;
+
+            // 对 think 属性进行特殊处理：将 'true'/'false' 字符串转换为布尔值
+            if ($name === 'think' && is_string($value)) {
+                if ($value === 'true') {
+                    $value = true;
+                } elseif ($value === 'false') {
+                    $value = false;
+                }
+                // 其它情况保持为字符串（如 'high', 'medium', 'low' 等）
+            }
+
+            $this->$name = $value;
             return $this;
         }
 

@@ -6,6 +6,7 @@ use Amp\Http\Client\HttpClient;
 use App\Libs\LLM\Clients\OpenAiClient;
 use App\Libs\LLM\Clients\OllamaClient;
 use App\Libs\LLM\Clients\MiniMaxClient;
+use App\Libs\LLM\Clients\AnthropicClient;
 
 /**
  * LLM 客户端工厂类
@@ -23,6 +24,19 @@ class ClientFactory
     private const OLLAMA_PROVIDERS = [
         'ollama' => [
             'base_url' => 'http://localhost:11434',
+        ],
+    ];
+
+    // Anthropic 兼容接口 Provider
+    private const ANTHROPIC_COMPATIBLES = [
+        'anthropic' => [
+            'base_url' => 'https://api.anthropic.com',
+        ],
+        'minimax-anthropic' => [
+            'base_url' => 'https://api.minimaxi.com/anthropic',
+        ],
+        'deepseek-anthropic' => [
+            'base_url' => 'https://api.deepseek.com/anthropic',
         ],
     ];
 
@@ -62,6 +76,11 @@ class ClientFactory
         // 再查找 Ollama 兼容接口
         if (isset(self::OLLAMA_PROVIDERS[$provider])) {
             return self::createOllamaProvider($provider, $httpClient, $options);
+        }
+
+        // 查找 Anthropic 兼容接口
+        if (isset(self::ANTHROPIC_COMPATIBLES[$provider])) {
+            return self::createAnthropicCompatible($provider, $httpClient, $options);
         }
 
         // 最后查找 OpenAI 兼容接口
@@ -135,6 +154,28 @@ class ClientFactory
     }
 
     /**
+     * 创建 Anthropic 兼容接口客户端
+     *
+     * @param string $provider Provider 名称
+     * @param HttpClient $httpClient HTTP 客户端
+     * @param array $options 选项
+     * @return AnthropicClient
+     */
+    private static function createAnthropicCompatible(string $provider, HttpClient $httpClient, array $options): AnthropicClient
+    {
+        $config = self::ANTHROPIC_COMPATIBLES[$provider];
+
+        // 优先使用传入的 api_key，否则从配置中读取
+        $apiKey = $options['api_key'] ?? config("llm.providers.{$provider}.api_key", '');
+        $baseUrl = $options['base_url'] ?? $config['base_url'];
+        $version = $options['version'] ?? '2023-06-01';  // API 版本
+        $defaultOptions = $options['default_options'] ?? [];
+        $timeout = $options['timeout'] ?? 60;
+
+        return new AnthropicClient($httpClient, $apiKey, $baseUrl, $version, $defaultOptions, $timeout);
+    }
+
+    /**
      * 获取所有支持的 Provider 名称列表
      *
      * @return array
@@ -144,6 +185,7 @@ class ClientFactory
         return array_merge(
             array_keys(self::CUSTOM_PROVIDERS),
             array_keys(self::OLLAMA_PROVIDERS),
+            array_keys(self::ANTHROPIC_COMPATIBLES),
             array_keys(self::OPENAI_COMPATIBLES)
         );
     }
