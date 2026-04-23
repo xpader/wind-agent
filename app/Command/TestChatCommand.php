@@ -24,7 +24,7 @@ class TestChatCommand extends Command
             ->setDescription('聊天测试命令（支持多种 LLM 平台）')
             ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek/anthropic/claude)', 'ollama')
             ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '')
-            ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:9b-q8_0')
+            ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:4b')
             ->addOption('system', 's', InputOption::VALUE_OPTIONAL, '系统提示词', '')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '用户提示词', '你好，请简单介绍一下你自己')
             ->addOption('temperature', 't', InputOption::VALUE_OPTIONAL, '温度参数 (0-2)', '0.7')
@@ -231,9 +231,10 @@ class TestChatCommand extends Command
         $hasContent = false;
         $allToolCalls = [];
         $allRawData = [];
+        $responseModel = ''; // 收集响应中的模型
 
         $client->chatStream($request, function(LLMResponse $response)
-            use ($output, &$fullResponse, &$fullThinking, &$hasThinking, &$hasContent, &$allToolCalls, &$allRawData) {
+            use ($output, &$fullResponse, &$fullThinking, &$hasThinking, &$hasContent, &$allToolCalls, &$allRawData, &$responseModel) {
 
             // 收集原始数据
             if ($response->raw !== null) {
@@ -243,6 +244,11 @@ class TestChatCommand extends Command
             // 收集工具调用
             if (count($response->toolCalls) > 0) {
                 $allToolCalls = array_merge($allToolCalls, $response->toolCalls);
+            }
+
+            // 收集响应中的模型（使用最后一个非空的模型）
+            if ($response->model !== '') {
+                $responseModel = $response->model;
             }
 
             // 显示思考过程
@@ -296,7 +302,7 @@ class TestChatCommand extends Command
         return LLMResponse::create()
             ->content($fullResponse)
             ->thinking($fullThinking)
-            ->model($config['model'])
+            ->model($responseModel !== '' ? $responseModel : $config['model'])
             ->done(true)
             ->toolCalls($allToolCalls);
     }

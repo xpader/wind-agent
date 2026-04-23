@@ -147,7 +147,7 @@ class AnthropicClient implements LLMClient
                                         $text,
                                         '',
                                         false
-                                    )->model($lastModel ?: $request->model);
+                                    )->model($lastModel);
                                     $callback($response);
                                 }
                             } elseif ($blockType === 'thinking_delta') {
@@ -159,7 +159,7 @@ class AnthropicClient implements LLMClient
                                         '',
                                         $thinking,
                                         false
-                                    )->model($lastModel ?: $request->model);
+                                    )->model($lastModel);
                                     $callback($response);
                                 }
                             } elseif ($blockType === 'input_json_delta') {
@@ -185,7 +185,7 @@ class AnthropicClient implements LLMClient
                                 '',
                                 '',
                                 true
-                            )->model($lastModel ?: $request->model);
+                            )->model($lastModel);
 
                             if (count($completeToolCalls) > 0) {
                                 $response->toolCalls($completeToolCalls);
@@ -216,7 +216,7 @@ class AnthropicClient implements LLMClient
         );
 
         // 发送完成信号
-        $callback(LLMResponse::createChunk('', '', true)->model($request->model));
+        $callback(LLMResponse::createChunk('', '', true)->model($lastModel));
     }
 
     /**

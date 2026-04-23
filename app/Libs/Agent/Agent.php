@@ -220,10 +220,11 @@ class Agent
             $fullThinking = '';
             $allToolCalls = [];
             $lastUsage = null;
+            $responseModel = ''; // 收集响应中的模型
 
             // 流式获取响应
             $this->provider->chatStream($request, function(LLMResponse $response)
-                use ($callback, &$fullContent, &$fullThinking, &$allToolCalls, &$lastUsage) {
+                use ($callback, &$fullContent, &$fullThinking, &$allToolCalls, &$lastUsage, &$responseModel) {
 
                 // 收集内容
                 if ($response->content !== '') {
@@ -245,6 +246,11 @@ class Agent
                     $lastUsage = $response->usage;
                 }
 
+                // 收集响应中的模型（使用最后一个非空的模型）
+                if ($response->model !== '') {
+                    $responseModel = $response->model;
+                }
+
                 // 调用用户回调
                 $callback($response, []);
             });
@@ -253,7 +259,7 @@ class Agent
             $finalResponse = LLMResponse::create()
                 ->content($fullContent)
                 ->thinking($fullThinking)
-                ->model($this->model)
+                ->model($responseModel !== '' ? $responseModel : $this->model)
                 ->done(true)
                 ->toolCalls($allToolCalls);
 

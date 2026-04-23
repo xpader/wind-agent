@@ -27,7 +27,7 @@ class TestAgentCommand extends Command
             ->setDescription('测试 Agent 类功能')
             ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek/anthropic/minimax-anthropic/deepseek-anthropic)', 'ollama')
             ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '')
-            ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:9b-q8_0')
+            ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:4b')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '系统提示词', '你是一个专业的 AI 助手，可以帮助用户解决各种问题。')
             ->addOption('message', null, InputOption::VALUE_OPTIONAL, '用户消息')
             ->addOption('max-tokens', null, InputOption::VALUE_OPTIONAL, '最大 token 数', '32768')
