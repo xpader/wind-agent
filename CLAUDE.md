@@ -41,6 +41,10 @@ php start.php reload
 
 # 列出所有可用命令
 ./wind
+
+# 创建新的 Console 命令
+./wind make:command <command-name> <ClassName>
+# 例如: ./wind make:command test:exec TestExecCommand
 ```
 
 ### 依赖管理
@@ -464,6 +468,28 @@ if ($content === '') { }
 if ($line !== '') { }
 if (count($array) > 0) { }
 ```
+
+### Git Commit 消息规范
+
+**描述变更针对的功能，而非具体代码改动**
+
+- ✅ 正确：修复 OpenAI 兼容接口的工具调用错误
+- ❌ 错误：修复 OpenAiClient 中 tool_use.input 为 [] 的问题
+
+commit 消息应该：
+- 描述修复或添加了什么功能
+- 说明变更的目的和影响
+- 让读者理解"为什么"而不是"改了什么"
+
+示例：
+- "修复 Anthropic 接口工具调用空参数错误"（描述功能问题）
+- "优化 Agent 多轮对话的上下文管理"（描述功能改进）
+- "添加流式响应的 token 统计功能"（描述功能添加）
+
+避免：
+- "将 tool_use.input 从 [] 改为 {}"（描述代码细节）
+- "修改 ClientFactory 的配置读取逻辑"（描述实现方式）
+- "在 parseChatResponse 中添加 usage 解析"（描述代码位置）
 
 ## 技术文档
 
