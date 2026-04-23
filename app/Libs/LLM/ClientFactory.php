@@ -15,39 +15,10 @@ use App\Libs\LLM\Clients\AnthropicClient;
  */
 class ClientFactory
 {
-    // 自定义 Provider（有专门的 Client 类）
-    private const CUSTOM_PROVIDERS = [
-        'minimax' => MiniMaxClient::class,
-    ];
-
-    // Ollama 兼容接口 Provider
-    private const OLLAMA_PROVIDERS = [
-        'ollama' => [
-            'base_url' => 'http://localhost:11434',
-        ],
-    ];
-
-    // Anthropic 兼容接口 Provider
-    private const ANTHROPIC_COMPATIBLES = [
-        'anthropic' => [
-            'base_url' => 'https://api.anthropic.com',
-        ],
-        'minimax-anthropic' => [
-            'base_url' => 'https://api.minimaxi.com/anthropic',
-        ],
-        'deepseek-anthropic' => [
-            'base_url' => 'https://api.deepseek.com/anthropic',
-        ],
-    ];
-
-    // OpenAI 兼容接口 Provider
-    private const OPENAI_COMPATIBLES = [
-        'openai' => [
-            'base_url' => 'https://api.openai.com/v1',
-        ],
-        'deepseek' => [
-            'base_url' => 'https://api.deepseek.com/v1',
-        ],
+    // Client 类别名映射
+    private const CLIENT_ALIASES = [
+        'openai' => OpenAiClient::class,
+        'anthropic' => AnthropicClient::class,
     ];
 
     /**
@@ -68,111 +39,84 @@ class ClientFactory
     {
         $provider = strtolower($provider);
 
-        // 先查找自定义 Provider
-        if (isset(self::CUSTOM_PROVIDERS[$provider])) {
-            return self::createCustomProvider($provider, $httpClient, $options);
+        // 从配置文件获取 Provider 配置
+        $providerConfig = config("llm.providers.{$provider}");
+
+        if ($providerConfig === null) {
+            throw new \InvalidArgumentException(
+                "不支持的 provider: {$provider}，" .
+                "支持的 provider: " . implode(', ', self::getSupportedProviders())
+            );
         }
 
-        // 再查找 Ollama 兼容接口
-        if (isset(self::OLLAMA_PROVIDERS[$provider])) {
-            return self::createOllamaProvider($provider, $httpClient, $options);
-        }
+        // 获取 Client 类
+        $clientClass = self::resolveClientClass($providerConfig['client'] ?? 'openai');
 
-        // 查找 Anthropic 兼容接口
-        if (isset(self::ANTHROPIC_COMPATIBLES[$provider])) {
-            return self::createAnthropicCompatible($provider, $httpClient, $options);
-        }
-
-        // 最后查找 OpenAI 兼容接口
-        if (isset(self::OPENAI_COMPATIBLES[$provider])) {
-            return self::createOpenAiCompatible($provider, $httpClient, $options);
-        }
-
-        throw new \InvalidArgumentException(
-            "不支持的 provider: {$provider}，" .
-            "支持的 provider: " . implode(', ', self::getSupportedProviders())
-        );
+        // 创建客户端实例
+        return self::createClient($clientClass, $provider, $providerConfig, $httpClient, $options);
     }
 
     /**
-     * 创建自定义 Provider 客户端
+     * 解析 Client 类名
      *
+     * @param string $client Client 类别名或完整类名
+     * @return string 完整的 Client 类名
+     */
+    private static function resolveClientClass(string $client): string
+    {
+        // 如果是别名，返回对应的类名
+        if (isset(self::CLIENT_ALIASES[$client])) {
+            return self::CLIENT_ALIASES[$client];
+        }
+
+        // 如果是完整类名，直接返回
+        if (class_exists($client)) {
+            return $client;
+        }
+
+        throw new \InvalidArgumentException("未知的 client 类型: {$client}");
+    }
+
+    /**
+     * 创建客户端实例
+     *
+     * @param string $clientClass Client 类名
      * @param string $provider Provider 名称
+     * @param array $providerConfig Provider 配置
      * @param HttpClient $httpClient HTTP 客户端
-     * @param array $options 选项
+     * @param array $options 额外选项
      * @return LLMClient
      */
-    private static function createCustomProvider(string $provider, HttpClient $httpClient, array $options): LLMClient
-    {
-        $className = self::CUSTOM_PROVIDERS[$provider];
+    private static function createClient(
+        string $clientClass,
+        string $provider,
+        array $providerConfig,
+        HttpClient $httpClient,
+        array $options = []
+    ): LLMClient {
+        // 优先使用传入的选项，否则从配置中读取
+        $apiKey = $options['api_key'] ?? $providerConfig['api_key'] ?? '';
+        $baseUrl = $options['base_url'] ?? $providerConfig['base_url'] ?? '';
+        $defaultOptions = $options['default_options'] ?? $providerConfig['default_options'] ?? [];
+        $timeout = $options['timeout'] ?? $providerConfig['timeout'] ?? 60;
+        $version = $options['version'] ?? $providerConfig['version'] ?? null;
 
-        // 优先使用传入的 api_key，否则从配置中读取
-        $apiKey = $options['api_key'] ?? config("llm.providers.{$provider}.api_key", '');
-        $baseUrl = $options['base_url'] ?? '';  // 空字符串使用类定义的默认值
-        $defaultOptions = $options['default_options'] ?? [];
-        $timeout = $options['timeout'] ?? 60;
+        // 根据不同的 Client 类创建实例
+        if ($clientClass === OllamaClient::class) {
+            return new OllamaClient($httpClient, $baseUrl, $timeout);
+        }
 
-        return new $className($httpClient, $apiKey, $baseUrl, '', $defaultOptions, $timeout);
-    }
+        if ($clientClass === AnthropicClient::class) {
+            $version = $version ?? '2023-06-01'; // 默认 API 版本
+            return new AnthropicClient($httpClient, $apiKey, $baseUrl, $version, $defaultOptions, $timeout);
+        }
 
-    /**
-     * 创建 Ollama 兼容接口客户端
-     *
-     * @param string $provider Provider 名称
-     * @param HttpClient $httpClient HTTP 客户端
-     * @param array $options 选项
-     * @return OllamaClient
-     */
-    private static function createOllamaProvider(string $provider, HttpClient $httpClient, array $options): OllamaClient
-    {
-        $config = self::OLLAMA_PROVIDERS[$provider];
-        $baseUrl = $options['base_url'] ?? $config['base_url'];
-        $timeout = $options['timeout'] ?? 60;
+        if ($clientClass === MiniMaxClient::class) {
+            return new MiniMaxClient($httpClient, $apiKey, $baseUrl, '', $defaultOptions, $timeout);
+        }
 
-        return new OllamaClient($httpClient, $baseUrl, $timeout);
-    }
-
-    /**
-     * 创建 OpenAI 兼容接口客户端
-     *
-     * @param string $provider Provider 名称
-     * @param HttpClient $httpClient HTTP 客户端
-     * @param array $options 选项
-     * @return OpenAiClient
-     */
-    private static function createOpenAiCompatible(string $provider, HttpClient $httpClient, array $options): OpenAiClient
-    {
-        $config = self::OPENAI_COMPATIBLES[$provider];
-
-        // 优先使用传入的 api_key，否则从配置中读取
-        $apiKey = $options['api_key'] ?? config("llm.providers.{$provider}.api_key", '');
-        $baseUrl = $options['base_url'] ?? $config['base_url'];
-        $defaultOptions = $options['default_options'] ?? [];
-        $timeout = $options['timeout'] ?? 60;
-
+        // 默认使用 OpenAiClient
         return new OpenAiClient($httpClient, $apiKey, $baseUrl, '', $defaultOptions, $timeout);
-    }
-
-    /**
-     * 创建 Anthropic 兼容接口客户端
-     *
-     * @param string $provider Provider 名称
-     * @param HttpClient $httpClient HTTP 客户端
-     * @param array $options 选项
-     * @return AnthropicClient
-     */
-    private static function createAnthropicCompatible(string $provider, HttpClient $httpClient, array $options): AnthropicClient
-    {
-        $config = self::ANTHROPIC_COMPATIBLES[$provider];
-
-        // 优先使用传入的 api_key，否则从配置中读取
-        $apiKey = $options['api_key'] ?? config("llm.providers.{$provider}.api_key", '');
-        $baseUrl = $options['base_url'] ?? $config['base_url'];
-        $version = $options['version'] ?? '2023-06-01';  // API 版本
-        $defaultOptions = $options['default_options'] ?? [];
-        $timeout = $options['timeout'] ?? 60;
-
-        return new AnthropicClient($httpClient, $apiKey, $baseUrl, $version, $defaultOptions, $timeout);
     }
 
     /**
@@ -182,12 +126,7 @@ class ClientFactory
      */
     public static function getSupportedProviders(): array
     {
-        return array_merge(
-            array_keys(self::CUSTOM_PROVIDERS),
-            array_keys(self::OLLAMA_PROVIDERS),
-            array_keys(self::ANTHROPIC_COMPATIBLES),
-            array_keys(self::OPENAI_COMPATIBLES)
-        );
+        return array_keys(config('llm.providers', []));
     }
 
     /**
@@ -198,6 +137,6 @@ class ClientFactory
      */
     public static function isProviderSupported(string $provider): bool
     {
-        return in_array(strtolower($provider), self::getSupportedProviders());
+        return config("llm.providers.{$provider}") !== null;
     }
 }

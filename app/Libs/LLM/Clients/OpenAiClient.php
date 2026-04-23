@@ -54,7 +54,7 @@ class OpenAiClient implements LLMClient
      */
     public function chat(LLMRequest $request): LLMResponse
     {
-        $payload = $request->toArray();
+        $payload = $this->buildOpenAiPayload($request);
         $response = $this->request('POST', '/chat/completions', $payload);
         $data = $this->safeJsonDecode($response);
 
@@ -89,7 +89,7 @@ class OpenAiClient implements LLMClient
      */
     protected function sendChatStream(LLMRequest $request, callable $callback, callable $isDoneCallback): void
     {
-        $payload = $request->toArray();
+        $payload = $this->buildOpenAiPayload($request);
         $payload['stream'] = true;
 
         $httpRequest = $this->createRequest('POST', '/chat/completions', $payload);
@@ -183,6 +183,18 @@ class OpenAiClient implements LLMClient
                             $completeToolCalls = [];
                             foreach ($accumulatedToolCalls as $toolCall) {
                                 if ($toolCall['function']['name'] !== '' && $toolCall['id'] !== '') {
+                                    // 解析 arguments 字符串为对象
+                                    $arguments = $toolCall['function']['arguments'] ?? '{}';
+                                    $parsedArgs = json_decode($arguments, true);
+
+                                    // 确保 parsedArgs 是对象
+                                    if (!is_array($parsedArgs)) {
+                                        $parsedArgs = [];
+                                    } elseif (array_is_list($parsedArgs)) {
+                                        $parsedArgs = [];
+                                    }
+
+                                    $toolCall['function']['arguments'] = $parsedArgs;
                                     $completeToolCalls[] = $toolCall;
                                 }
                             }
@@ -385,5 +397,39 @@ class OpenAiClient implements LLMClient
         }
 
         return $chunk;
+    }
+
+    /**
+     * 构建 OpenAI 格式的请求载荷
+     * 将 tool_calls 中的 arguments 从对象格式转换为 JSON 字符串
+     */
+    private function buildOpenAiPayload(LLMRequest $request): array
+    {
+        $payload = $request->toArray();
+
+        // 转换消息中的 tool_calls 格式
+        if (isset($payload['messages']) && is_array($payload['messages'])) {
+            foreach ($payload['messages'] as &$message) {
+                if (isset($message['tool_calls']) && is_array($message['tool_calls'])) {
+                    foreach ($message['tool_calls'] as &$toolCall) {
+                        if (isset($toolCall['function']['arguments'])) {
+                            $arguments = $toolCall['function']['arguments'];
+
+                            // 如果是对象，转换为 JSON 字符串
+                            if (is_array($arguments)) {
+                                // 空数组时转换为空对象
+                                if (!$arguments) {
+                                    $arguments = (object)[];
+                                }
+                                $toolCall['function']['arguments'] = json_encode($arguments, JSON_UNESCAPED_UNICODE);
+                            }
+                            // 如果已经是字符串，保持不变
+                        }
+                    }
+                }
+            }
+        }
+
+        return $payload;
     }
 }

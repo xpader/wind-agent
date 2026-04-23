@@ -176,6 +176,14 @@ class AnthropicClient implements LLMClient
                             $completeToolCalls = [];
                             foreach ($accumulatedToolCalls as $toolCall) {
                                 if ($toolCall['function']['name'] !== '' && $toolCall['id'] !== '') {
+                                    // 解析 arguments 字符串为对象
+                                    $arguments = $toolCall['function']['arguments'] ?? '{}';
+                                    $parsedArgs = json_decode($arguments, true);
+                                    if ($parsedArgs === null) {
+                                        $parsedArgs = [];
+                                    }
+
+                                    $toolCall['function']['arguments'] = $parsedArgs;
                                     $completeToolCalls[] = $toolCall;
                                 }
                             }
@@ -193,10 +201,17 @@ class AnthropicClient implements LLMClient
 
                             // 设置 usage 信息
                             if (isset($data['usage'])) {
+                                // 计算输入 tokens（包含缓存相关的 tokens）
+                                $inputTokens = ($data['usage']['input_tokens'] ?? 0)
+                                    + ($data['usage']['cache_creation_input_tokens'] ?? 0)
+                                    + ($data['usage']['cache_read_input_tokens'] ?? 0);
+
+                                $outputTokens = $data['usage']['output_tokens'] ?? 0;
+
                                 $response->usage(new TokenUsage(
-                                    $data['usage']['input_tokens'] ?? 0,
-                                    $data['usage']['output_tokens'] ?? 0,
-                                    ($data['usage']['input_tokens'] ?? 0) + ($data['usage']['output_tokens'] ?? 0)
+                                    $inputTokens,
+                                    $outputTokens,
+                                    $inputTokens + $outputTokens
                                 ));
                             }
 
@@ -464,11 +479,17 @@ class AnthropicClient implements LLMClient
                 }
 
                 foreach ($message['tool_calls'] as $toolCall) {
+                    // arguments 现在是对象格式，直接使用
+                    $input = $toolCall['function']['arguments'] ?? [];
+                    if (!$input) {
+                        $input = (object)[];
+                    }
+
                     $contentBlocks[] = [
                         'type' => 'tool_use',
                         'id' => $toolCall['id'] ?? '',
                         'name' => $toolCall['function']['name'] ?? '',
-                        'input' => json_decode($toolCall['function']['arguments'] ?? '{}', true) ?? []
+                        'input' => $input
                     ];
                 }
 
@@ -519,12 +540,13 @@ class AnthropicClient implements LLMClient
                     $content .= $block['text'] ?? '';
                 } elseif ($blockType === 'tool_use') {
                     // 转换为 OpenAI 格式的 tool_calls
+                    // 注意：arguments 保持对象格式，不转字符串
                     $toolCalls[] = [
                         'id' => $block['id'] ?? '',
                         'type' => 'function',
                         'function' => [
                             'name' => $block['name'] ?? '',
-                            'arguments' => json_encode($block['input'] ?? [])
+                            'arguments' => $block['input'] ?? []  // 保持对象格式
                         ]
                     ];
                 }
@@ -539,10 +561,17 @@ class AnthropicClient implements LLMClient
 
         // 解析使用情况
         if (isset($data['usage'])) {
+            // 计算输入 tokens（包含缓存相关的 tokens）
+            $inputTokens = ($data['usage']['input_tokens'] ?? 0)
+                + ($data['usage']['cache_creation_input_tokens'] ?? 0)
+                + ($data['usage']['cache_read_input_tokens'] ?? 0);
+
+            $outputTokens = $data['usage']['output_tokens'] ?? 0;
+
             $response->usage(new TokenUsage(
-                $data['usage']['input_tokens'] ?? 0,
-                $data['usage']['output_tokens'] ?? 0,
-                ($data['usage']['input_tokens'] ?? 0) + ($data['usage']['output_tokens'] ?? 0)
+                $inputTokens,
+                $outputTokens,
+                $inputTokens + $outputTokens
             ));
         }
 
