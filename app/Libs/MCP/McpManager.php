@@ -11,7 +11,7 @@ use App\Libs\Agent\ToolInterface;
  */
 class McpManager
 {
-    /** @var array<string, McpClient> MCP 客户端映射表 */
+    /** @var array<string, McpClientInterface> MCP 客户端映射表 */
     private static array $clients = [];
 
     /** @var array<string, ToolInterface> MCP 工具映射表 */
@@ -42,33 +42,28 @@ class McpManager
         // 初始化启用的服务器
         $servers = self::$config['servers'] ?? [];
 
-        error_log("MCP: 开始遍历 " . count($servers) . " 个服务器");
-
         foreach ($servers as $serverName => $serverConfig) {
-            error_log("MCP: 检查服务器 {$serverName}, enabled=" . var_export($serverConfig['enabled'] ?? false, true));
-
             // 检查是否启用
             if (!($serverConfig['enabled'] ?? false)) {
-                error_log("MCP: 服务器 {$serverName} 未启用 (enabled=" . var_export($serverConfig['enabled'] ?? false, true) . ")");
                 continue;
             }
 
             // 如果指定了启用的服务器列表，检查是否在列表中
             if ($enabledServers !== null && !in_array($serverName, $enabledServers)) {
-                error_log("MCP: 服务器 {$serverName} 不在启用列表中");
                 continue;
             }
 
             try {
-                error_log("MCP: 开始初始化服务器 {$serverName}...");
+                echo "MCP: 正在初始化服务器 {$serverName}... ";
                 self::initServer($serverName, $serverConfig);
-                error_log("MCP: 服务器 {$serverName} 初始化成功");
+                echo "成功.\n";
             } catch (\Throwable $e) {
                 $continueOnError = self::$config['options']['continue_on_error'] ?? true;
 
+                echo "失败: {$e->getMessage()}\n";
+
                 if ($continueOnError) {
-                    // 记录错误但继续初始化其他服务器
-                    error_log("MCP 服务器初始化失败 ({$serverName}): " . $e->getMessage() . " in " . $e->getFile() . ":" . $e->getLine());
+                    // 继续初始化其他服务器
                     continue;
                 } else {
                     throw new \RuntimeException("MCP 服务器初始化失败 ({$serverName}): " . $e->getMessage(), 0, $e);
@@ -89,15 +84,25 @@ class McpManager
      */
     private static function initServer(string $serverName, array $serverConfig): void
     {
-        $command = $serverConfig['command'] ?? '';
-        $args = $serverConfig['args'] ?? [];
-        $env = $serverConfig['env'] ?? [];
         $timeout = self::$config['options']['timeout'] ?? 30;
 
-        // 创建客户端
-        $client = new McpClient($serverName, $command, $args, $env, $timeout);
+        // 根据配置类型创建客户端
+        if (isset($serverConfig['url'])) {
+            // HTTP 传输
+            $url = $serverConfig['url'];
+            $headers = $serverConfig['headers'] ?? [];
 
-        // 初始化客户端（启动进程并进行握手）
+            $client = new McpHttpClient($serverName, $url, $headers, null, $timeout);
+        } else {
+            // stdio 传输（默认）
+            $command = $serverConfig['command'] ?? '';
+            $args = $serverConfig['args'] ?? [];
+            $env = $serverConfig['env'] ?? [];
+
+            $client = new McpStdioClient($serverName, $command, $args, $env);
+        }
+
+        // 初始化客户端
         $client->initialize();
 
         // 保存客户端
@@ -146,7 +151,7 @@ class McpManager
     /**
      * 获取所有 MCP 客户端
      *
-     * @return array<string, McpClient>
+     * @return array<string, McpClientInterface>
      */
     public static function getClients(): array
     {
@@ -161,9 +166,9 @@ class McpManager
      * 获取指定名称的客户端
      *
      * @param string $name 服务器名称
-     * @return McpClient|null
+     * @return McpClientInterface|null
      */
-    public static function getClient(string $name): ?McpClient
+    public static function getClient(string $name): ?McpClientInterface
     {
         if (!self::$initialized) {
             self::init();
