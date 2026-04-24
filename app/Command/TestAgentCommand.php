@@ -461,6 +461,7 @@ class TestAgentCommand extends Command
 
         $output->writeln('<fg=white;options=bold>========================================</>');
         $output->writeln('<fg=white;options=bold>输入你的消息，按 Enter 发送</>');
+        $output->writeln('<fg=white;options=bold>输入 "clear" 清空对话上下文</>');
         $output->writeln('<fg=white;options=bold>输入 "quit" 或 "exit" 退出</>');
         $output->writeln('<fg=white;options=bold>按 Ctrl+C 强制退出</>');
         $output->writeln('<fg=white;options=bold>========================================</>');
@@ -474,6 +475,10 @@ class TestAgentCommand extends Command
             $question->setValidator(function ($answer) {
                 if ($answer === 'quit' || $answer === 'exit' || $answer === 'q') {
                     return '__QUIT__';  // 特殊标记表示退出
+                }
+
+                if ($answer === 'clear') {
+                    return '__CLEAR__';  // 特殊标记表示清空上下文
                 }
 
                 if ($answer === null || $answer === '') {
@@ -493,6 +498,14 @@ class TestAgentCommand extends Command
                 if ($userMessage === '__QUIT__') {
                     $output->writeln('<fg=green>👋 再见！</>');
                     break;
+                }
+
+                // 检查是否清空上下文
+                if ($userMessage === '__CLEAR__') {
+                    $agent->clearMessages();
+                    $output->writeln('<fg=cyan>🗑️  对话上下文已清空</>');
+                    $output->writeln('');
+                    continue;
                 }
 
                 // 跳过空输入

@@ -55,6 +55,12 @@ class OpenAiClient implements LLMClient
     public function chat(LLMRequest $request): LLMResponse
     {
         $payload = $this->buildOpenAiPayload($request);
+
+        // 调试：打印请求 payload（仅在调试模式）
+        if (getenv('DEBUG_OPENAI_PAYLOAD') === 'true') {
+            error_log('[OpenAiClient] Request payload: ' . json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
+        }
+
         $response = $this->request('POST', '/chat/completions', $payload);
         $data = $this->safeJsonDecode($response);
 
@@ -402,6 +408,7 @@ class OpenAiClient implements LLMClient
     /**
      * 构建 OpenAI 格式的请求载荷
      * 将 tool_calls 中的 arguments 从对象格式转换为 JSON 字符串
+     * 处理 DeepSeek/OpenAI 的思考模式参数
      */
     private function buildOpenAiPayload(LLMRequest $request): array
     {
@@ -426,6 +433,26 @@ class OpenAiClient implements LLMClient
                             // 如果已经是字符串，保持不变
                         }
                     }
+                }
+            }
+        }
+
+        // 处理思考模式参数（DeepSeek/OpenAI 格式）
+        if ($request->think !== null) {
+            // 移除统一层的 'think' 参数
+            unset($payload['think']);
+
+            if ($request->think === false) {
+                // 禁用思考模式
+                $payload['thinking'] = ['type' => 'disabled'];
+            } elseif ($request->think === true) {
+                // 启用思考模式（默认）
+                $payload['thinking'] = ['type' => 'enabled'];
+            } elseif (is_string($request->think)) {
+                // 支持推理强度控制：low, medium, high, max
+                if (in_array($request->think, ['low', 'medium', 'high', 'max'])) {
+                    $payload['reasoning_effort'] = $request->think;
+                    $payload['thinking'] = ['type' => 'enabled'];
                 }
             }
         }

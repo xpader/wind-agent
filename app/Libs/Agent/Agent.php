@@ -178,10 +178,7 @@ class Agent
             // 如果没有工具调用，结束对话
             if (!$response->hasToolCalls()) {
                 // 添加最终助手响应到消息历史
-                $this->messages[] = [
-                    'role' => 'assistant',
-                    'content' => $response->content
-                ];
+                $this->messages[] = $this->createAssistantMessage($response->content, [], $response->thinking);
 
                 // 执行迭代回调（传递空的工具结果）
                 if ($onIteration !== null) {
@@ -192,7 +189,7 @@ class Agent
             }
 
             // 添加助手响应到消息历史
-            $assistantMessage = $this->createAssistantMessage($response->content, $response->toolCalls);
+            $assistantMessage = $this->createAssistantMessage($response->content, $response->toolCalls, $response->thinking);
             $this->messages[] = $assistantMessage;
 
             // 执行工具调用
@@ -300,12 +297,12 @@ class Agent
             // 如果没有工具调用，结束对话
             if (!$finalResponse->hasToolCalls()) {
                 // 添加助手响应到消息历史
-                $this->messages[] = $this->createAssistantMessage($fullContent);
+                $this->messages[] = $this->createAssistantMessage($fullContent, [], $fullThinking);
                 break;
             }
 
             // 添加助手响应到消息历史
-            $this->messages[] = $this->createAssistantMessage($fullContent, $allToolCalls);
+            $this->messages[] = $this->createAssistantMessage($fullContent, $allToolCalls, $fullThinking);
 
             // 执行工具调用
             $toolResults = $finalResponse->executeToolCalls();
@@ -348,9 +345,10 @@ class Agent
      *
      * @param string $content 响应内容
      * @param array $toolCalls 工具调用列表
+     * @param string $thinking 推理内容（用于 DeepSeek 等推理模型）
      * @return array 助手消息数组
      */
-    private function createAssistantMessage(string $content, array $toolCalls = []): array
+    private function createAssistantMessage(string $content, array $toolCalls = [], string $thinking = ''): array
     {
         $message = [
             'role' => 'assistant',
@@ -360,6 +358,11 @@ class Agent
         // 如果有工具调用，添加到消息中
         if (count($toolCalls) > 0) {
             $message['tool_calls'] = $toolCalls;
+        }
+
+        // 如果有推理内容，添加到消息中（DeepSeek v4-flash 等推理模型需要）
+        if ($thinking !== '') {
+            $message['reasoning_content'] = $thinking;
         }
 
         return $message;
@@ -394,9 +397,9 @@ class Agent
         $request->temperature($this->temperature);
         $request->maxTokens($this->maxTokens);
 
-        // 设置思考模式
+        // 设置思考模式（使用方法调用以触发类型转换）
         if ($this->think !== null) {
-            $request->think = $this->think;
+            $request->think($this->think);
         }
 
         // 添加工具
@@ -415,6 +418,23 @@ class Agent
     public function getMessages(): array
     {
         return $this->messages;
+    }
+
+    /**
+     * 清空消息历史
+     *
+     * 保留系统消息,清空其他所有对话历史
+     *
+     * @return void
+     */
+    public function clearMessages(): void
+    {
+        // 保留系统消息(如果有)
+        $systemMessages = array_filter($this->messages, function($message) {
+            return ($message['role'] ?? '') === 'system';
+        });
+
+        $this->messages = array_values($systemMessages);
     }
 
     /**
