@@ -56,11 +56,6 @@ class OpenAiClient implements LLMClient
     {
         $payload = $this->buildOpenAiPayload($request);
 
-        // 调试：打印请求 payload（仅在调试模式）
-        if (getenv('DEBUG_OPENAI_PAYLOAD') === 'true') {
-            error_log('[OpenAiClient] Request payload: ' . json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE));
-        }
-
         $response = $this->request('POST', '/chat/completions', $payload);
         $data = $this->safeJsonDecode($response);
 

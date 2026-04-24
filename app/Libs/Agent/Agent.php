@@ -330,7 +330,7 @@ class Agent
             $request->temperature($this->temperature);
             $request->maxTokens($this->maxTokens);
             if ($this->think !== null) {
-                $request->think = $this->think;
+                $request->think($this->think);
             }
             foreach ($this->tools as $tool) {
                 $request->addTool($tool);
@@ -360,7 +360,8 @@ class Agent
             $message['tool_calls'] = $toolCalls;
         }
 
-        // 如果有推理内容，添加到消息中（DeepSeek v4-flash 等推理模型需要）
+        // 只有当思考内容不为空时才添加 reasoning_content 字段
+        // 空字符串的 reasoning_content 会被 DeepSeek API 识别为启用了思考模式
         if ($thinking !== '') {
             $message['reasoning_content'] = $thinking;
         }
