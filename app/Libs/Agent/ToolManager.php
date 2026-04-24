@@ -53,6 +53,17 @@ class ToolManager
     }
 
     /**
+     * 注册工具（用于 MCP 工具等动态工具）
+     *
+     * @param ToolInterface $tool 工具实例
+     * @return void
+     */
+    public static function register(ToolInterface $tool): void
+    {
+        self::$tools[$tool->getName()] = $tool;
+    }
+
+    /**
      * 获取所有工具
      *
      * @return array<ToolInterface>

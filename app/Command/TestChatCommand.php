@@ -24,7 +24,7 @@ class TestChatCommand extends Command
             ->setDescription('聊天测试命令（支持多种 LLM 平台）')
             ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek/anthropic/claude)', 'ollama')
             ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '')
-            ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:4b')
+            ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', '')
             ->addOption('system', 's', InputOption::VALUE_OPTIONAL, '系统提示词', '')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '用户提示词', '你好，请简单介绍一下你自己')
             ->addOption('temperature', 't', InputOption::VALUE_OPTIONAL, '温度参数 (0-2)', '0.7')

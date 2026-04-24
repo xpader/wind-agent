@@ -47,20 +47,8 @@ class ExecTool implements ToolInterface
             throw new \RuntimeException('命令不能为空');
         }
 
-        // 禁止执行 rm 命令（硬编码安全限制）
-        if (preg_match('/\brm\b/', $command)) {
-            throw new \RuntimeException('禁止删除文件');
-        }
-
-        // 基本的安全检查（允许 && 连续执行，但禁止 & 单独使用和其他危险字符）
-        // 检查单独的 &（不允许后台执行）
-        if (preg_match('/(?<!&)&(?!&)/', $command)) {
-            throw new \RuntimeException('命令包含不安全的字符');
-        }
-        // 检查其他危险字符
-        if (preg_match('/[;|`$()]/', $command)) {
-            throw new \RuntimeException('命令包含不安全的字符');
-        }
+        // 执行安全检查
+        $this->safetyCheck($command);
 
         $descriptorspec = [
             0 => ['pipe', 'r'],  // stdin
@@ -111,5 +99,29 @@ class ExecTool implements ToolInterface
                 'parameters' => $this->getParameters()
             ]
         ];
+    }
+
+    /**
+     * 安全检查
+     * @param string $command 要检查的命令
+     * @throws \RuntimeException 当命令不安全时抛出异常
+     */
+    public function safetyCheck(string $command): void
+    {
+        // 禁止执行 rm 命令（硬编码安全限制）
+        if (preg_match('/\brm\b/', $command)) {
+            throw new \RuntimeException('命令包含不安全的字符');
+        }
+
+        // 基本的安全检查
+        // 检查单独的 &（不允许后台执行），但排除 URL 中的 & 和 &&
+        // 匹配单独的 &，但不匹配引号内的 &（URL 参数）和 &&
+        if (preg_match('/(?<!&)&(?!&)/', $command) && !preg_match('/["\'].*&.*["\']/', $command)) {
+            throw new \RuntimeException('命令包含不安全的字符');
+        }
+        // 检查其他危险字符
+        if (preg_match('/[;|`$()]/', $command)) {
+            throw new \RuntimeException('命令包含不安全的字符');
+        }
     }
 }

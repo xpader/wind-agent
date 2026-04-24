@@ -7,6 +7,7 @@ use App\Libs\LLM\LLMClient;
 use App\Libs\LLM\LLMResponse;
 use App\Libs\LLM\ClientFactory;
 use App\Libs\Agent\ToolManager;
+use App\Libs\MCP\McpManager;
 use Amp\Http\Client\HttpClientBuilder;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -27,7 +28,7 @@ class TestAgentCommand extends Command
             ->setDescription('测试 Agent 类功能')
             ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek/anthropic/minimax-anthropic/deepseek-anthropic)', 'ollama')
             ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '')
-            ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', 'qwen3.5:4b')
+            ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', '')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '系统提示词', '你是一个专业的 AI 助手，可以帮助用户解决各种问题。')
             ->addOption('message', null, InputOption::VALUE_OPTIONAL, '用户消息')
             ->addOption('max-tokens', null, InputOption::VALUE_OPTIONAL, '最大 token 数', '32768')
@@ -37,6 +38,8 @@ class TestAgentCommand extends Command
             ->addOption('think', null, InputOption::VALUE_OPTIONAL, '启用思考模式 (true/false/high/medium/low)')
             ->addOption('with-tools', null, InputOption::VALUE_NONE, '启用工具调用')
             ->addOption('with-skills', null, InputOption::VALUE_NONE, '启用技能支持')
+            ->addOption('with-mcp', null, InputOption::VALUE_NONE, '启用 MCP 工具支持')
+            ->addOption('mcp-servers', null, InputOption::VALUE_OPTIONAL, '指定启用的 MCP 服务器（逗号分隔）')
             ->addOption('show-history', null, InputOption::VALUE_NONE, '显示完整消息历史');
     }
 
@@ -51,6 +54,20 @@ class TestAgentCommand extends Command
         // 准备工具
         $tools = $config['withTools'] ? ToolManager::getAll() : [];
 
+        // 初始化 MCP 服务器（如果启用）
+        if ($config['withMcp']) {
+            try {
+                $enabledServers = $config['mcpServers'] !== '' ?
+                    explode(',', $config['mcpServers']) : null;
+                McpManager::init($enabledServers);
+            } catch (\Throwable $e) {
+                $output->writeln("<fg=yellow>⚠️  MCP 初始化失败: {$e->getMessage()}</>");
+                if (!($config['continueOnError'] ?? true)) {
+                    throw $e;
+                }
+            }
+        }
+
         // 创建 Agent
         $agent = new Agent(
             systemPrompt: $config['systemPrompt'],
@@ -60,7 +77,8 @@ class TestAgentCommand extends Command
             provider: $client,
             maxTokens: $config['maxTokens'],
             temperature: $config['temperature'],
-            think: $config['think']
+            think: $config['think'],
+            withMcp: $config['withMcp']
         );
 
         // 显示标题和配置信息
@@ -95,6 +113,15 @@ class TestAgentCommand extends Command
         } catch (\Throwable $e) {
             $this->displayError($e, $output);
             return self::FAILURE;
+        } finally {
+            // 确保 MCP 连接被关闭
+            if ($config['withMcp']) {
+                try {
+                    McpManager::closeAll();
+                } catch (\Throwable $e) {
+                    // 忽略关闭时的错误
+                }
+            }
         }
     }
 
@@ -116,6 +143,8 @@ class TestAgentCommand extends Command
             'think' => $input->getOption('think'),
             'withTools' => $input->getOption('with-tools'),
             'withSkills' => $input->getOption('with-skills'),
+            'withMcp' => $input->getOption('with-mcp'),
+            'mcpServers' => $input->getOption('mcp-servers') ?? '',
             'showHistory' => $input->getOption('show-history'),
         ];
     }
@@ -179,6 +208,20 @@ class TestAgentCommand extends Command
         }
         if ($config['withSkills']) {
             $output->writeln("<info>技能支持:</info> 启用");
+        }
+        if ($config['withMcp']) {
+            $mcpServersList = $config['mcpServers'] !== '' ? $config['mcpServers'] : '全部';
+            $output->writeln("<info>MCP 工具:</info> 启用 (服务器: {$mcpServersList})");
+            if ($config['withMcp']) {
+                try {
+                    $clientCount = McpManager::getClientCount();
+                    $toolCount = McpManager::getToolCount();
+                    $output->writeln("<info>MCP 客户端:</info> {$clientCount}");
+                    $output->writeln("<info>MCP 工具数:</info> {$toolCount}");
+                } catch (\Throwable $e) {
+                    $output->writeln("<info>MCP 状态:</info> 初始化失败");
+                }
+            }
         }
 
         $output->writeln('');

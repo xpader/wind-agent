@@ -6,6 +6,7 @@ use App\Libs\LLM\LLMClient;
 use App\Libs\LLM\LLMRequest;
 use App\Libs\LLM\LLMResponse;
 use App\Libs\Agent\ToolInterface;
+use App\Libs\MCP\McpManager;
 
 /**
  * Agent 类
@@ -48,6 +49,9 @@ class Agent
     /** Skill 管理器 */
     private ?SkillManager $skillManager = null;
 
+    /** 是否启用 MCP */
+    private bool $withMcp = false;
+
     /**
      * 构造函数
      *
@@ -57,6 +61,7 @@ class Agent
      * @param string $model 模型名称
      * @param LLMClient $provider LLM 提供商实例
      * @param int $maxTokens 最大 token 数
+     * @param bool $withMcp 是否启用 MCP 工具
      */
     public function __construct(
         string $systemPrompt = '',
@@ -66,7 +71,8 @@ class Agent
         ?LLMClient $provider = null,
         int $maxTokens = 32768,
         float $temperature = 0.7,
-        $think = null
+        $think = null,
+        bool $withMcp = false
     ) {
         $this->systemPrompt = $systemPrompt;
         $this->tools = $tools;
@@ -75,6 +81,7 @@ class Agent
         $this->maxTokens = $maxTokens;
         $this->temperature = $temperature;
         $this->think = $think;
+        $this->withMcp = $withMcp;
 
         // 如果没有提供 provider，使用默认的 Ollama 客户端
         if ($provider === null) {
@@ -91,6 +98,23 @@ class Agent
         // 初始化 Skill 管理器
         if ($this->withSkills) {
             $this->skillManager = new SkillManager();
+        }
+
+        // 初始化 MCP 工具
+        if ($this->withMcp) {
+            try {
+                McpManager::init();
+                $mcpTools = McpManager::getAllTools();
+                foreach ($mcpTools as $tool) {
+                    // 添加到工具列表（用于发送给 LLM）
+                    $this->tools[] = $tool;
+                    // 注册到 ToolManager（用于执行）
+                    ToolManager::register($tool);
+                }
+            } catch (\Throwable $e) {
+                // MCP 初始化失败不应该阻止 Agent 创建
+                error_log("MCP 初始化失败: " . $e->getMessage());
+            }
         }
 
         // 如果有系统提示词或技能，添加到消息历史
@@ -403,5 +427,22 @@ class Agent
     public function getTotalTokens(): int
     {
         return $this->lastTotalTokens;
+    }
+
+    /**
+     * 析构函数
+     *
+     * 确保 MCP 连接被正确关闭
+     */
+    public function __destruct()
+    {
+        if ($this->withMcp) {
+            try {
+                McpManager::closeAll();
+            } catch (\Throwable $e) {
+                // 忽略析构时的错误
+                error_log("MCP 关闭失败: " . $e->getMessage());
+            }
+        }
     }
 }

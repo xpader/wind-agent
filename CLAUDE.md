@@ -265,6 +265,14 @@ interface ToolInterface {
 - 工具调用支持流式和非流式两种模式
 - 支持多轮对话和工具链式调用
 
+**JSON-RPC 参数格式要求（关键）**：
+- MCP 协议和 Tool Call 都严格要求参数格式
+- **空参数必须是对象 `{}` 而不是数组 `[]`**
+- 正确：`'params' => new \stdClass()` 生成 `"params": {}`
+- 错误：`'params' => []` 生成 `"params": []`
+- 服务器会拒绝空数组格式的参数，导致 "Invalid input: expected object, received array" 错误
+- 有参数时使用关联数组，会自动转换为对象：`'params' => ['url' => 'xxx']` 生成 `"params": {"url": "xxx"}`
+
 **设计原则**
 - **配置驱动** - 通过配置文件管理工具，方便启用/禁用
 - **接口统一** - 所有工具实现相同的接口
@@ -492,5 +500,56 @@ commit 消息应该：
 - "在 parseChatResponse 中添加 usage 解析"（描述代码位置）
 
 ## 技术文档
+
+- `docs/php-tui.md` - php-tui 终端 UI 开发完整指南（核心概念、组件系统、事件处理、布局管理、常见问题、最佳实践）
+
+## MCP (Model Context Protocol) 实现
+
+项目实现了完整的 MCP 客户端支持，允许 AI Agent 调用 MCP 服务器提供的工具。
+
+**核心实现**
+- `McpClient` - MCP 协议客户端（使用原生 PHP proc_open，不依赖 AMPHP）
+- `McpManager` - MCP 服务器和工具管理器
+- `McpToolWrapper` - 将 MCP 工具适配到 ToolInterface
+
+**配置文件**
+- `config/mcp.php` - MCP 服务器配置
+
+**测试命令**
+```bash
+# 列出 MCP 服务器
+./wind test:mcp --list-servers
+
+# 列出 MCP 工具
+./wind test:mcp --list-tools
+
+# 纯 PHP 测试（不依赖框架）
+./wind test:mcp-pure-php
+
+# 在 Agent 中使用 MCP 工具
+./wind test:agent --with-mcp --mcp-servers=fetch
+```
+
+**重要：JSON-RPC 参数格式要求**
+MCP 协议和 Tool Call 都严格要求参数格式：
+- **空参数必须是对象 `{}` 而不是数组 `[]`**
+- 正确：`'params' => new \stdClass()` 生成 `"params": {}`
+- 错误：`'params' => []` 生成 `"params": []`
+- 服务器会拒绝空数组格式，返回 "Invalid input: expected object, received array" 错误
+- 有参数时使用关联数组：`'params' => ['url' => 'xxx']` 生成 `"params": {"url": "xxx"}`
+- 这个要求同时适用于：MCP JSON-RPC 请求、Tool Call 参数定义
+
+**已测试的 MCP 服务器**
+- `@tokenizin/mcp-npx-fetch` - HTTP 请求工具（fetch_html, fetch_markdown, fetch_txt, fetch_json）
+- `@modelcontextprotocol/server-brave-search` - Brave 搜索
+- `@modelcontextprotocol/server-github` - GitHub 集成
+- `@modelcontextprotocol/server-memory` - 内存存储
+
+**关键实现细节**
+- 使用 `proc_open()` 和管道进行 stdio 通信
+- 使用 `fgets()` 阻塞读取 JSON-RPC 响应
+- 使用 `fflush()` 确保数据立即发送
+- 在发送 `initialized` 通知后需要 `sleep(1)` 延迟
+- 必须正确设置 PATH 环境变量以便 `npx` 找到 MCP 服务器
 
 - `docs/php-tui.md` - php-tui 终端 UI 开发完整指南（核心概念、组件系统、事件处理、布局管理、常见问题、最佳实践）
