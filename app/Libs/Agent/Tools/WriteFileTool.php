@@ -7,7 +7,7 @@ use App\Libs\Agent\ToolInterface;
 /**
  * 写入文件工具
  */
-class WriteFileTool implements ToolInterface
+class WriteFileTool extends FileOperateTool implements ToolInterface
 {
     public function getName(): string
     {
@@ -16,7 +16,7 @@ class WriteFileTool implements ToolInterface
 
     public function getDescription(): string
     {
-        return '将内容写入指定文件（如果文件不存在则创建，存在则覆盖）';
+        return '将内容写入指定文件。如果文件不存在则创建，存在则根据 overwrite 参数决定是否覆盖';
     }
 
     public function getParameters(): array
@@ -26,11 +26,16 @@ class WriteFileTool implements ToolInterface
             'properties' => [
                 'path' => [
                     'type' => 'string',
-                    'description' => '文件路径'
+                    'description' => '文件路径（支持 ~/ 开头的相对路径）'
                 ],
                 'content' => [
                     'type' => 'string',
                     'description' => '要写入的内容'
+                ],
+                'overwrite' => [
+                    'type' => 'boolean',
+                    'description' => '是否覆盖已存在的文件，true=覆盖，false=不覆盖（默认为 false）',
+                    'default' => false
                 ]
             ],
             'required' => ['path', 'content']
@@ -41,9 +46,19 @@ class WriteFileTool implements ToolInterface
     {
         $path = $arguments['path'] ?? '';
         $content = $arguments['content'] ?? '';
+        $overwrite = $arguments['overwrite'] ?? false;
 
-        if (empty($path)) {
-            throw new \RuntimeException('文件路径不能为空');
+        $this->validatePathNotEmpty($path);
+
+        // 处理 ~/ 路径扩展
+        $path = $this->expandPath($path);
+
+        // 优先检查 overwrite 参数，避免不必要的文件系统调用
+        if (!$overwrite) {
+            clearstatcache(true, $path);
+            if (file_exists($path)) {
+                throw new \RuntimeException("文件已存在且 overwrite=false，拒绝覆盖：{$path}");
+            }
         }
 
         $directory = dirname($path);

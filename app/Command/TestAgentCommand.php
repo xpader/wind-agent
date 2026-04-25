@@ -70,7 +70,10 @@ class TestAgentCommand extends Command
 
         // 创建 Agent
         $agent = new Agent(
-            systemPrompt: $config['systemPrompt'],
+            systemPromptFiles: [
+                BASE_DIR . '/workspace/AGENTS.md',
+                BASE_DIR . '/workspace/MEMORY.md'
+            ],
             tools: $tools,
             withSkills: $config['withSkills'],
             model: $config['model'],
@@ -192,7 +195,7 @@ class TestAgentCommand extends Command
         $output->writeln("<info>客户端类型:</info> {$clientName}");
         $output->writeln("<info>服务地址:</info> {$config['host']}");
         $output->writeln("<info>模型名称:</info> {$config['model']}");
-        $output->writeln("<info>系统提示词:</info> {$config['systemPrompt']}");
+        $output->writeln("<info>系统提示词文件:</info> AGENTS.md, MEMORY.md");
         $output->writeln("<info>用户消息:</info> {$config['userMessage']}");
         $output->writeln("<info>温度参数:</info> {$config['temperature']}");
         $output->writeln("<info>最大 tokens:</info> {$config['maxTokens']}");

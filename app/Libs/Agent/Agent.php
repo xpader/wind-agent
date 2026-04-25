@@ -16,8 +16,11 @@ use App\Libs\MCP\McpManager;
  */
 class Agent
 {
-    /** 系统提示词 */
-    private string $systemPrompt;
+    /** 系统提示词文件列表 */
+    private array $systemPromptFiles = [];
+
+    /** 系统提示词组件缓存 [key => ['content' => string, 'mtime' => int]] */
+    private array $systemPromptComponents = [];
 
     /** 添加的工具 */
     private array $tools;
@@ -55,7 +58,7 @@ class Agent
     /**
      * 构造函数
      *
-     * @param string $systemPrompt 系统提示词
+     * @param array $systemPromptFiles 系统提示词文件列表（相对路径）
      * @param array $tools 工具列表
      * @param bool $withSkills 是否启用技能
      * @param string $model 模型名称
@@ -64,7 +67,7 @@ class Agent
      * @param bool $withMcp 是否启用 MCP 工具
      */
     public function __construct(
-        string $systemPrompt = '',
+        array $systemPromptFiles = [],
         array $tools = [],
         bool $withSkills = false,
         string $model = 'gpt-3.5-turbo',
@@ -74,7 +77,7 @@ class Agent
         $think = null,
         bool $withMcp = false
     ) {
-        $this->systemPrompt = $systemPrompt;
+        $this->systemPromptFiles = $systemPromptFiles;
         $this->tools = $tools;
         $this->withSkills = $withSkills;
         $this->model = $model;
@@ -126,27 +129,154 @@ class Agent
      */
     private function initializeSystemMessage(): void
     {
-        $systemParts = [];
-
-        // 添加基础系统提示词
-        if ($this->systemPrompt !== '') {
-            $systemParts[] = $this->systemPrompt;
+        // 加载文件组件
+        foreach ($this->systemPromptFiles as $file) {
+            $this->loadSystemPromptFileComponent($file);
         }
 
-        // 添加技能提示词
+        // 添加技能组件
         if ($this->withSkills && $this->skillManager !== null) {
-            $skillsPrompt = $this->skillManager->generatePrompt();
-            if ($skillsPrompt !== '') {
-                $systemParts[] = $skillsPrompt;
+            $this->updateSkillsComponent();
+        }
+
+        // 组装并添加系统消息
+        $this->assembleSystemMessage();
+    }
+
+    /**
+     * 组装系统消息
+     */
+    private function assembleSystemMessage(): void
+    {
+        $contents = array_column($this->systemPromptComponents, 'content');
+
+        if (count($contents) > 0) {
+            $systemContent = implode("\n\n", $contents);
+
+            // 查找现有的系统消息
+            $systemIndex = null;
+            foreach ($this->messages as $index => $message) {
+                if (($message['role'] ?? '') === 'system') {
+                    $systemIndex = $index;
+                    break;
+                }
+            }
+
+            // 更新或添加系统消息
+            if ($systemIndex !== null) {
+                $this->messages[$systemIndex]['content'] = $systemContent;
+            } else {
+                array_unshift($this->messages, [
+                    'role' => 'system',
+                    'content' => $systemContent
+                ]);
+            }
+        }
+    }
+
+    /**
+     * 加载系统提示词文件组件
+     *
+     * @param string $file 文件路径
+     */
+    private function loadSystemPromptFileComponent(string $file): void
+    {
+        $fullPath = $this->resolveFullPath($file);
+        $key = 'file:' . $file;
+
+        if (!file_exists($fullPath)) {
+            return;
+        }
+
+        clearstatcache(true, $fullPath);
+        $mtime = filemtime($fullPath);
+
+        // 检查是否需要重新加载
+        if (!isset($this->systemPromptComponents[$key]) ||
+            $this->systemPromptComponents[$key]['mtime'] !== $mtime) {
+
+            $content = file_get_contents($fullPath);
+            if ($content !== false) {
+                $this->systemPromptComponents[$key] = [
+                    'content' => $content,
+                    'mtime' => $mtime
+                ];
+            }
+        }
+    }
+
+    /**
+     * 更新技能组件
+     */
+    private function updateSkillsComponent(): void
+    {
+        if ($this->skillManager === null) {
+            return;
+        }
+
+        $key = 'skills';
+        $content = $this->skillManager->generatePrompt();
+
+        if ($content !== '') {
+            // 使用时间戳作为 mtime，确保技能提示词每次都能更新
+            $this->systemPromptComponents[$key] = [
+                'content' => $content,
+                'mtime' => time()
+            ];
+        }
+    }
+
+    /**
+     * 解析文件的完整路径
+     *
+     * @param string $file 文件路径（相对于 workspace 目录或绝对路径）
+     * @return string 完整路径
+     */
+    private function resolveFullPath(string $file): string
+    {
+        // 支持绝对路径和相对路径
+        if (strpos($file, '/') !== 0 && strpos($file, ':') !== 1) {
+            // 相对路径，基于 BASE_DIR 拼接
+            return BASE_DIR . '/' . ltrim($file, '/');
+        }
+        return $file;
+    }
+
+    /**
+     * 检查并更新系统提示词组件
+     */
+    private function updateSystemPromptIfNeeded(): void
+    {
+        if (count($this->systemPromptFiles) === 0) {
+            return;
+        }
+
+        $needsUpdate = false;
+
+        // 清除所有文件状态缓存（一次性清除所有）
+        clearstatcache();
+
+        // 检查文件组件是否有更新
+        foreach ($this->systemPromptFiles as $file) {
+            $fullPath = $this->resolveFullPath($file);
+
+            if (!file_exists($fullPath)) {
+                continue;
+            }
+
+            $currentMtime = filemtime($fullPath);
+            $key = 'file:' . $file;
+
+            if (!isset($this->systemPromptComponents[$key]) ||
+                $this->systemPromptComponents[$key]['mtime'] !== $currentMtime) {
+                $this->loadSystemPromptFileComponent($file);
+                $needsUpdate = true;
             }
         }
 
-        // 如果有系统消息，添加到历史
-        if (count($systemParts) > 0) {
-            $this->messages[] = [
-                'role' => 'system',
-                'content' => implode("\n\n", $systemParts)
-            ];
+        // 如果需要更新，重新组装系统消息
+        if ($needsUpdate) {
+            $this->assembleSystemMessage();
         }
     }
 
@@ -215,6 +345,9 @@ class Agent
                 $onIteration($iteration + 1, $response, $toolResults);
             }
         }
+
+        // 聊天结束后，检查并更新系统提示词
+        $this->updateSystemPromptIfNeeded();
 
         return $response;
     }
@@ -336,6 +469,9 @@ class Agent
                 $request->addTool($tool);
             }
         }
+
+        // 聊天结束后，检查并更新系统提示词
+        $this->updateSystemPromptIfNeeded();
 
         return $finalResponse;
     }

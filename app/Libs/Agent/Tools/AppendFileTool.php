@@ -5,18 +5,18 @@ namespace App\Libs\Agent\Tools;
 use App\Libs\Agent\ToolInterface;
 
 /**
- * 读取文件工具
+ * 追加文件工具
  */
-class ReadFileTool extends FileOperateTool implements ToolInterface
+class AppendFileTool extends FileOperateTool implements ToolInterface
 {
     public function getName(): string
     {
-        return 'read_file';
+        return 'append_file';
     }
 
     public function getDescription(): string
     {
-        return '读取指定文件的内容';
+        return '将内容追加到指定文件末尾（文件必须存在）';
     }
 
     public function getParameters(): array
@@ -27,15 +27,20 @@ class ReadFileTool extends FileOperateTool implements ToolInterface
                 'path' => [
                     'type' => 'string',
                     'description' => '文件路径（支持 ~/ 开头的相对路径）'
+                ],
+                'content' => [
+                    'type' => 'string',
+                    'description' => '要追加的内容'
                 ]
             ],
-            'required' => ['path']
+            'required' => ['path', 'content']
         ];
     }
 
     public function execute(array $arguments): string
     {
         $path = $arguments['path'] ?? '';
+        $content = $arguments['content'] ?? '';
 
         $this->validatePathNotEmpty($path);
 
@@ -44,20 +49,18 @@ class ReadFileTool extends FileOperateTool implements ToolInterface
 
         clearstatcache(true, $path);
 
+        // 检查文件是否存在
         if (!file_exists($path)) {
-            throw new \RuntimeException("文件不存在：{$path}");
+            throw new \RuntimeException("文件不存在，无法追加：{$path}");
         }
 
-        if (!is_readable($path)) {
-            throw new \RuntimeException("文件不可读：{$path}");
+        // 追加内容到文件
+        $result = file_put_contents($path, $content, FILE_APPEND);
+        if ($result === false) {
+            throw new \RuntimeException("无法写入文件：{$path}");
         }
 
-        $content = file_get_contents($path);
-        if ($content === false) {
-            throw new \RuntimeException("无法读取文件：{$path}");
-        }
-
-        return $content;
+        return "成功：已追加 {$result} 字节到文件：{$path}";
     }
 
     public function toArray(): array
