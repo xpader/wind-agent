@@ -293,10 +293,13 @@ class Agent
         $request = $this->createRequest($userMessage);
 
         // 多轮对话处理（支持工具调用）
-        $maxIterations = count($this->tools) > 0 ? 10 : 1;
+        $maxToolCalls = 50; // 一轮对话中最多允许的工具调用次数
+        $totalToolCalls = 0; // 累计工具调用次数
         $response = null;
+        $iteration = 0;
 
-        for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
+        while (true) {
+            $iteration++;
             // 获取响应
             $response = $this->provider->chat($request);
 
@@ -318,12 +321,22 @@ class Agent
                 break;
             }
 
+            // 检查工具调用次数是否超过限制
+            $currentToolCallCount = count($response->toolCalls);
+            if ($totalToolCalls + $currentToolCallCount > $maxToolCalls) {
+                // 达到限制，抛出异常
+                throw new \RuntimeException("已达到一轮对话中的工具调用次数限制 ({$maxToolCalls} 次)，已调用 {$totalToolCalls} 次。任务可能过于复杂，请简化任务或分步执行。");
+            }
+
             // 添加助手响应到消息历史
             $assistantMessage = $this->createAssistantMessage($response->content, $response->toolCalls, $response->thinking);
             $this->messages[] = $assistantMessage;
 
             // 执行工具调用
             $toolResults = $response->executeToolCalls();
+
+            // 累计工具调用次数
+            $totalToolCalls += $currentToolCallCount;
 
             // 将 assistant 消息添加到请求中（确保 MiniMax 等平台能找到对应的 tool_call_id）
             $request->addMessage('assistant', $response->content, ['tool_calls' => $response->toolCalls]);
@@ -365,10 +378,13 @@ class Agent
         $request = $this->createRequest($userMessage);
 
         // 多轮对话处理（支持工具调用）
-        $maxIterations = count($this->tools) > 0 ? 10 : 1;
+        $maxToolCalls = 50; // 一轮对话中最多允许的工具调用次数
+        $totalToolCalls = 0; // 累计工具调用次数
         $finalResponse = null;
+        $iteration = 0;
 
-        for ($iteration = 0; $iteration < $maxIterations; $iteration++) {
+        while (true) {
+            $iteration++;
             // 收集流式响应的完整内容
             $fullContent = '';
             $fullThinking = '';
@@ -434,11 +450,21 @@ class Agent
                 break;
             }
 
+            // 检查工具调用次数是否超过限制
+            $currentToolCallCount = count($allToolCalls);
+            if ($totalToolCalls + $currentToolCallCount > $maxToolCalls) {
+                // 达到限制，抛出异常
+                throw new \RuntimeException("已达到一轮对话中的工具调用次数限制 ({$maxToolCalls} 次)，已调用 {$totalToolCalls} 次。任务可能过于复杂，请简化任务或分步执行。");
+            }
+
             // 添加助手响应到消息历史
             $this->messages[] = $this->createAssistantMessage($fullContent, $allToolCalls, $fullThinking);
 
             // 执行工具调用
             $toolResults = $finalResponse->executeToolCalls();
+
+            // 累计工具调用次数
+            $totalToolCalls += $currentToolCallCount;
 
             $toolMessages = [];
             foreach ($toolResults as $result) {
