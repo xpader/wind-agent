@@ -3,7 +3,6 @@
 namespace App\Command;
 
 use App\Libs\MCP\McpManager;
-use App\Libs\MCP\McpClient;
 use App\Libs\Agent\ToolInterface;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -126,7 +125,16 @@ class TestMcpCommand extends Command
 
         foreach ($clients as $name => $client) {
             $output->writeln("<fg=green>服务器:</fg=green> {$name}");
-            $output->writeln("<info>  命令:</info> " . get反射类属性($client, 'command'));
+
+            // 根据客户端类型显示不同的信息
+            if ($client instanceof \App\Libs\MCP\McpStdioClient) {
+                $output->writeln("<info>  类型:</info> stdio");
+                $output->writeln("<info>  命令:</info> " . $client->getCommand());
+            } elseif ($client instanceof \App\Libs\MCP\McpHttpClient) {
+                $output->writeln("<info>  类型:</info> HTTP");
+                $output->writeln("<info>  URL:</info> " . $client->getUrl());
+            }
+
             $output->writeln("<info>  能力:</info> " . json_encode($client->getCapabilities(), JSON_UNESCAPED_UNICODE));
             $output->writeln('');
         }
@@ -150,29 +158,59 @@ class TestMcpCommand extends Command
         foreach ($clients as $name => $client) {
             $output->writeln("<fg=green>服务器:</fg=green> {$name}");
 
-            // 显示命令
-            $command = get反射类属性($client, 'command');
-            $args = get反射类属性($client, 'args');
-            $output->writeln("<info>  命令:</info> {$command}");
-            $output->writeln("<info>  参数:</info> " . implode(' ', array_map(fn($arg) => escapeshellarg($arg), $args)));
+            // 根据客户端类型显示不同的信息
+            if ($client instanceof \App\Libs\MCP\McpStdioClient) {
+                $output->writeln("<info>  类型:</info> stdio");
 
-            // 显示环境变量
-            $env = get反射类属性($client, 'env');
-            if (count($env) > 0) {
-                $output->writeln("<info>  环境变量:</info>");
-                foreach ($env as $key => $value) {
-                    // 隐藏敏感信息
-                    if ($value !== '') {
-                        $displayValue = strlen($value) > 20
-                            ? substr($value, 0, 10) . '...' . substr($value, -7)
-                            : $value;
-                        $output->writeln("    {$key} = {$displayValue}");
-                    } else {
-                        $output->writeln("    {$key} = (空)");
+                // 显示命令
+                $command = $client->getCommand();
+                $args = $client->getArgs();
+                $output->writeln("<info>  命令:</info> {$command}");
+                $output->writeln("<info>  参数:</info> " . implode(' ', array_map(fn($arg) => escapeshellarg($arg), $args)));
+
+                // 显示环境变量
+                $env = $client->getEnv();
+                if (count($env) > 0) {
+                    $output->writeln("<info>  环境变量:</info>");
+                    foreach ($env as $key => $value) {
+                        // 隐藏敏感信息
+                        if ($value !== '') {
+                            $displayValue = strlen($value) > 20
+                                ? substr($value, 0, 10) . '...' . substr($value, -7)
+                                : $value;
+                            $output->writeln("    {$key} = {$displayValue}");
+                        } else {
+                            $output->writeln("    {$key} = (空)");
+                        }
                     }
+                } else {
+                    $output->writeln("<info>  环境变量:</info> (无)");
                 }
-            } else {
-                $output->writeln("<info>  环境变量:</info> (无)");
+            } elseif ($client instanceof \App\Libs\MCP\McpHttpClient) {
+                $output->writeln("<info>  类型:</info> HTTP");
+
+                // 显示 URL
+                $url = $client->getUrl();
+                $output->writeln("<info>  URL:</info> {$url}");
+
+                // 显示请求头
+                $headers = $client->getHeaders();
+                if (count($headers) > 0) {
+                    $output->writeln("<info>  请求头:</info>");
+                    foreach ($headers as $key => $value) {
+                        // 隐藏敏感信息
+                        if (stripos($key, 'authorization') !== false || stripos($key, 'api-key') !== false) {
+                            $displayValue = strlen($value) > 20
+                                ? substr($value, 0, 10) . '...' . substr($value, -7)
+                                : '***';
+                            $output->writeln("    {$key} = {$displayValue}");
+                        } else {
+                            $output->writeln("    {$key} = {$value}");
+                        }
+                    }
+                } else {
+                    $output->writeln("<info>  请求头:</info> (无)");
+                }
             }
 
             $output->writeln('');
@@ -268,19 +306,4 @@ class TestMcpCommand extends Command
         $output->writeln("<error>错误位置:</error> {$e->getFile()}:{$e->getLine()}");
         $output->writeln('');
     }
-}
-
-/**
- * 获取对象的私有属性值
- *
- * @param object $obj 对象
- * @param string $property 属性名
- * @return mixed
- */
-function get反射类属性(object $obj, string $property): mixed
-{
-    $reflection = new \ReflectionClass($obj);
-    $property = $reflection->getProperty($property);
-    $property->setAccessible(true);
-    return $property->getValue($obj);
 }

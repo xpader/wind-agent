@@ -16,7 +16,7 @@ class WriteFileTool extends FileOperateTool implements ToolInterface
 
     public function getDescription(): string
     {
-        return '将内容写入指定文件。如果文件不存在则创建，存在则根据 overwrite 参数决定是否覆盖';
+        return '将内容写入指定文件，可以创建或修改文件';
     }
 
     public function getParameters(): array
@@ -30,11 +30,11 @@ class WriteFileTool extends FileOperateTool implements ToolInterface
                 ],
                 'content' => [
                     'type' => 'string',
-                    'description' => '要写入的内容'
+                    'description' => '要写入的完整内容'
                 ],
                 'overwrite' => [
                     'type' => 'boolean',
-                    'description' => '是否覆盖已存在的文件，true=覆盖，false=不覆盖（默认为 false）',
+                    'description' => '是否覆盖已存在的文件。创建新文件时使用 false（默认），替换或修改现有文件内容时使用 true',
                     'default' => false
                 ]
             ],

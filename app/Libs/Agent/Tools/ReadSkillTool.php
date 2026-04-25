@@ -54,7 +54,7 @@ class ReadSkillTool implements ToolInterface
                 'skill_name' => [
                     'type' => 'string',
                     'description' => '技能名称',
-                    'enum' => $skillNames ?: ['code-analysis', 'documentation', 'file-operation'],
+                    'enum' => $skillNames,
                 ]
             ],
             'required' => ['skill_name'],

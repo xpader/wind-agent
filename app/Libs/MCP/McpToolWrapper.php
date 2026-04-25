@@ -11,8 +11,8 @@ use App\Libs\Agent\ToolInterface;
  */
 class McpToolWrapper implements ToolInterface
 {
-    /** @var McpClient MCP 客户端 */
-    private McpClient $client;
+    /** @var McpClientInterface MCP 客户端 */
+    private McpClientInterface $client;
 
     /** @var array 工具定义 */
     private array $toolDefinition;
@@ -20,10 +20,10 @@ class McpToolWrapper implements ToolInterface
     /**
      * 构造函数
      *
-     * @param McpClient $client MCP 客户端
+     * @param McpClientInterface $client MCP 客户端
      * @param array $toolDefinition 工具定义
      */
-    public function __construct(McpClient $client, array $toolDefinition)
+    public function __construct(McpClientInterface $client, array $toolDefinition)
     {
         $this->client = $client;
         $this->toolDefinition = $toolDefinition;
@@ -125,7 +125,7 @@ class McpToolWrapper implements ToolInterface
     /**
      * 获取 MCP 客户端
      */
-    public function getClient(): McpClient
+    public function getClient(): McpClientInterface
     {
         return $this->client;
     }

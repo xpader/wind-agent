@@ -381,7 +381,7 @@ metadata:
 **统一聊天测试 (test:chat)**
 ```bash
 # 基本对话测试
-./wind test:chat --prompt "你好" --model qwen3.5:9b-q8_0
+./wind test:chat --prompt "你好" --model qwen3.5:4b
 
 # 流式输出
 ./wind test:chat --prompt "写一首诗" --stream
@@ -508,12 +508,48 @@ commit 消息应该：
 项目实现了完整的 MCP 客户端支持，允许 AI Agent 调用 MCP 服务器提供的工具。
 
 **核心实现**
-- `McpClient` - MCP 协议客户端（使用原生 PHP proc_open，不依赖 AMPHP）
+- `McpClientInterface` - MCP 客户端统一接口
+- `McpStdioClient` - stdio 传输客户端（使用原生 PHP proc_open）
+- `McpHttpClient` - HTTP 传输客户端（基于 Streamable HTTP 规范）
 - `McpManager` - MCP 服务器和工具管理器
 - `McpToolWrapper` - 将 MCP 工具适配到 ToolInterface
 
 **配置文件**
 - `config/mcp.php` - MCP 服务器配置
+
+**支持两种传输方式**
+
+1. **stdio 传输**（本地进程）
+   - 使用 `command` 和 `args` 启动本地 MCP 服务器进程
+   - 适用于本地工具和脚本
+   - 示例：fetch, minimax, brave-search, github, memory
+
+2. **HTTP 传输**（远程服务器）
+   - 使用 `url` 连接远程 MCP 服务器
+   - 可选 `headers` 用于认证
+   - 适用于云服务和远程 MCP 端点
+   - 示例：exa (https://mcp.exa.ai/mcp)
+
+**配置示例**
+
+```php
+// stdio 传输（本地进程）
+'fetch' => [
+    'enabled' => env('MCP_FETCH') === true,
+    'command' => 'npx',
+    'args' => ['-y', '@tokenizin/mcp-npx-fetch'],
+    'env' => [],
+],
+
+// HTTP 传输（远程服务器）
+'exa' => [
+    'enabled' => env('MCP_EXA') === true,
+    'url' => 'https://mcp.exa.ai/mcp',
+    'headers' => [
+        'Authorization' => 'Bearer ' . env('MCP_EXA_API_KEY', ''),
+    ],
+],
+```
 
 **测试命令**
 ```bash
@@ -523,11 +559,11 @@ commit 消息应该：
 # 列出 MCP 工具
 ./wind test:mcp --list-tools
 
-# 纯 PHP 测试（不依赖框架）
-./wind test:mcp-pure-php
-
 # 在 Agent 中使用 MCP 工具
-./wind test:agent --with-mcp --mcp-servers=fetch
+./wind test:agent --with-mcp --mcp-servers=fetch,exa
+
+# 测试 HTTP MCP 客户端
+php workspace/tests/test_mcp_http.php
 ```
 
 **重要：JSON-RPC 参数格式要求**
@@ -537,19 +573,34 @@ MCP 协议和 Tool Call 都严格要求参数格式：
 - 错误：`'params' => []` 生成 `"params": []`
 - 服务器会拒绝空数组格式，返回 "Invalid input: expected object, received array" 错误
 - 有参数时使用关联数组：`'params' => ['url' => 'xxx']` 生成 `"params": {"url": "xxx"}`
-- 这个要求同时适用于：MCP JSON-RPC 请求、Tool Call 参数定义
+- 这个要求同时适用于：stdio 和 HTTP 两种传输方式
 
 **已测试的 MCP 服务器**
+
+stdio 传输：
 - `@tokenizin/mcp-npx-fetch` - HTTP 请求工具（fetch_html, fetch_markdown, fetch_txt, fetch_json）
 - `@modelcontextprotocol/server-brave-search` - Brave 搜索
 - `@modelcontextprotocol/server-github` - GitHub 集成
 - `@modelcontextprotocol/server-memory` - 内存存储
+- `minimax-coding-plan-mcp` - MiniMax 编码计划
+
+HTTP 传输：
+- `exa` - AI 搜索服务 (https://mcp.exa.ai/mcp)
 
 **关键实现细节**
+
+stdio 传输：
 - 使用 `proc_open()` 和管道进行 stdio 通信
 - 使用 `fgets()` 阻塞读取 JSON-RPC 响应
 - 使用 `fflush()` 确保数据立即发送
 - 在发送 `initialized` 通知后需要 `sleep(1)` 延迟
 - 必须正确设置 PATH 环境变量以便 `npx` 找到 MCP 服务器
+
+HTTP 传输：
+- 使用 AMPHP HttpClient 发送 HTTP POST 请求
+- 支持 MCP 会话管理（MCP-Session-Id）
+- 遵循 MCP Streamable HTTP 规范（2025-11-25）
+- 包含必需的 HTTP 头：Accept, MCP-Protocol-Version
+- 支持自定义认证头（Authorization, X-API-Key 等）
 
 - `docs/php-tui.md` - php-tui 终端 UI 开发完整指南（核心概念、组件系统、事件处理、布局管理、常见问题、最佳实践）

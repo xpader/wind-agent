@@ -3,11 +3,11 @@
 namespace App\Libs\MCP;
 
 /**
- * MCP 客户端类
+ * MCP stdio 客户端类
  *
  * 实现与 MCP 服务器的 JSON-RPC 通信（stdio 传输）
  */
-class McpClient
+class McpStdioClient implements McpClientInterface
 {
     private string $name;
     private string $command;
@@ -332,6 +332,21 @@ class McpClient
     public function getName(): string
     {
         return $this->name;
+    }
+
+    public function getCommand(): string
+    {
+        return $this->command;
+    }
+
+    public function getArgs(): array
+    {
+        return $this->args;
+    }
+
+    public function getEnv(): array
+    {
+        return $this->env;
     }
 
     public function getCapabilities(): array

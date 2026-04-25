@@ -10,6 +10,10 @@
  * - MCP_<SERVER_NAME>_<VAR_NAME>: 服务器专用环境变量
  * - MCP_TIMEOUT: 全局连接超时时间
  * - MCP_REQUEST_TIMEOUT: 全局请求超时时间
+ *
+ * 传输方式说明：
+ * - stdio 传输：使用 'command' 和 'args' 启动本地进程
+ * - HTTP 传输：使用 'url' 连接远程 MCP 服务器
  */
 return [
     'servers' => [
@@ -58,6 +62,30 @@ return [
                 'MINIMAX_API_HOST' => env('MINIMAX_API_HOST', 'https://api.minimaxi.com'),
                 'MINIMAX_API_KEY' => env('MINIMAX_API_KEY', ''),
             ],
+        ],
+
+        // Exa HTTP MCP 服务器（AI 搜索服务）
+        'exa' => [
+            'enabled' => env('MCP_EXA') === true,
+            'url' => 'https://mcp.exa.ai/mcp',
+            'headers' => [
+                'Authorization' => 'Bearer ' . env('MCP_EXA_API_KEY', ''),
+            ],
+        ],
+
+        // 智谱 AI Web Reader 服务器
+        'zhipu-web-reader' => [
+            'enabled' => env('MCP_ZHIPU_WEB_READER') === true,
+            'url' => 'https://open.bigmodel.cn/api/mcp/web_reader/mcp',
+            'headers' => [
+                'Authorization' => 'Bearer ' . env('MCP_ZHIPU_WEB_READER_API_KEY', ''),
+            ],
+        ],
+
+        // Context7 上下文管理服务器
+        'context7' => [
+            'enabled' => env('MCP_CONTEXT7') === true,
+            'url' => 'https://mcp.context7.com/mcp',
         ],
     ],
 

@@ -10,6 +10,7 @@ return [
     'enabled' => [
         \App\Libs\Agent\Tools\ReadFileTool::class,
         \App\Libs\Agent\Tools\WriteFileTool::class,
+        \App\Libs\Agent\Tools\EditFileTool::class,
         \App\Libs\Agent\Tools\AppendFileTool::class,
         \App\Libs\Agent\Tools\ExecTool::class,
         \App\Libs\Agent\Tools\ReadSkillTool::class,

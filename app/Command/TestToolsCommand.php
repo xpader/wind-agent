@@ -33,7 +33,7 @@ class TestToolsCommand extends Command
                 'm',
                 InputOption::VALUE_OPTIONAL,
                 '模型名称',
-                'qwen3.5:9b-q8_0'
+                'qwen3.5:4b'
             )
             ->addOption(
                 'prompt',
