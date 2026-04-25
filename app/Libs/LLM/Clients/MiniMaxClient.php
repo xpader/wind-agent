@@ -18,6 +18,28 @@ class MiniMaxClient extends OpenAiClient
     protected string $baseUrl = 'https://api.minimax.chat/v1';
 
     /**
+     * 获取模型列表
+     *
+     * MiniMax API 不提供模型列表端点，返回已知支持的模型
+     *
+     * @return array 模型数组，每个模型包含 id 字段
+     */
+    public function listModels(): array
+    {
+        // MiniMax API 不提供 /models 端点（返回 404）
+        // 返回已知支持的模型
+        $models = [
+            'MiniMax-M2.7',
+            'MiniMax-M2.7-highspeed',
+        ];
+
+        // 返回与其他客户端一致的对象数组格式
+        return array_map(function($modelId) {
+            return ['id' => $modelId];
+        }, $models);
+    }
+
+    /**
      * 重写 chatStream 方法以处理流式思考标签和 MiniMax 特殊的 usage 块
      */
     public function chatStream(LLMRequest $request, callable $callback): void

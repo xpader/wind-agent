@@ -237,20 +237,16 @@ class AnthropicClient implements LLMClient
     /**
      * 获取模型列表
      *
-     * Anthropic 不提供模型列表 API，返回支持的模型列表
+     * Anthropic 不提供模型列表 API，返回特殊标识
      *
-     * @return array
+     * @return array 包含特殊标识符的数组
      */
     public function listModels(): array
     {
-        // Anthropic 不提供模型列表端点，返回已知支持的模型
+        // Anthropic 不提供模型列表端点
+        // 返回特殊标识符，表示此功能不支持
         return [
-            'claude-3-5-sonnet-20241022',
-            'claude-3-5-sonnet-20240620',
-            'claude-3-5-haiku-20241022',
-            'claude-3-opus-20240229',
-            'claude-3-sonnet-20240229',
-            'claude-3-haiku-20240307',
+            ['id' => 'anthropic-compatible-list-models-unsupported']
         ];
     }
 

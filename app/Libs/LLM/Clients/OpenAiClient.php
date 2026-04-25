@@ -254,12 +254,13 @@ class OpenAiClient implements LLMClient
     /**
      * 获取模型列表
      *
-     * @return array
+     * @return array 模型数组
      */
     public function listModels(): array
     {
         $response = $this->request('GET', '/models');
-        return $this->safeJsonDecode($response);
+        $data = $this->safeJsonDecode($response);
+        return $data['data'] ?? [];
     }
 
     /**
