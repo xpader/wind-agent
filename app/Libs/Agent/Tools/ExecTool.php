@@ -3,12 +3,24 @@
 namespace App\Libs\Agent\Tools;
 
 use App\Libs\Agent\ToolInterface;
+use App\Libs\ShellCommandParser;
 
 /**
  * 执行命令工具
+ *
+ * 安全策略：
+ * - 基于 AST 深度分析命令结构
+ * - 只阻止真正危险的操作
+ * - 允许安全的管道、逻辑操作等
  */
 class ExecTool implements ToolInterface
 {
+    // 安全配置
+    private const ALLOWED_OPERATORS = ['and', 'or', 'pipe', 'sequence']; // 允许的操作符类型
+    private const DANGEROUS_COMMANDS = ['rm', 'dd', 'mkfs', 'fdisk', 'nc', 'nmap', 'format']; // 危险命令列表
+    private const PRIVILEGE_COMMANDS = ['sudo', 'su', 'doas']; // 特权命令列表
+    private const MAX_COMMANDS = 10; // 单次执行的最大命令数量
+
     public function getName(): string
     {
         return 'exec_command';
@@ -43,12 +55,12 @@ class ExecTool implements ToolInterface
         $command = $arguments['command'] ?? '';
         $timeout = $arguments['timeout'] ?? 30;
 
-        if (empty($command)) {
+        if ($command === '') {
             throw new \RuntimeException('命令不能为空');
         }
 
-        // 执行安全检查
-        $this->safetyCheck($command);
+        // 执行深度安全检查
+        $this->deepSafetyCheck($command);
 
         $descriptorspec = [
             0 => ['pipe', 'r'],  // stdin
@@ -102,26 +114,228 @@ class ExecTool implements ToolInterface
     }
 
     /**
-     * 安全检查
+     * 深度安全检查（基于 AST 分析）
+     *
      * @param string $command 要检查的命令
      * @throws \RuntimeException 当命令不安全时抛出异常
      */
-    public function safetyCheck(string $command): void
+    private function deepSafetyCheck(string $command): void
     {
-        // 禁止执行 rm 命令（硬编码安全限制）
-        if (preg_match('/\brm\b/', $command)) {
-            throw new \RuntimeException('命令包含不安全的字符');
+        // 解析命令为 AST
+        $ast = ShellCommandParser::parse($command);
+
+        // 1. 检查命令数量限制
+        $commandCount = $this->countCommands($ast['ast']);
+        if ($commandCount > self::MAX_COMMANDS) {
+            throw new \RuntimeException("命令数量超过限制（最多 " . self::MAX_COMMANDS . " 个）");
         }
 
-        // 基本的安全检查
-        // 检查单独的 &（不允许后台执行），但排除 URL 中的 & 和 &&
-        // 匹配单独的 &，但不匹配引号内的 &（URL 参数）和 &&
-        if (preg_match('/(?<!&)&(?!&)/', $command) && !preg_match('/["\'].*&.*["\']/', $command)) {
-            throw new \RuntimeException('命令包含不安全的字符');
+        // 2. 检查危险操作符
+        $this->checkOperators($ast['ast']);
+
+        // 3. 检查危险命令
+        $this->checkDangerousCommands($ast['ast']);
+
+        // 4. 检查特权命令
+        $this->checkPrivilegeEscalation($ast['ast']);
+
+        // 5. 检查危险参数组合
+        $this->checkDangerousArgs($ast['ast']);
+    }
+
+    /**
+     * 统计命令数量
+     *
+     * @param mixed $ast AST 节点或数组
+     * @return int 命令数量
+     */
+    private function countCommands($ast): int
+    {
+        $count = 0;
+
+        $this->traverseAst($ast, function($node) use (&$count) {
+            if (($node['type'] ?? '') === 'command') {
+                $count++;
+            }
+        });
+
+        return $count;
+    }
+
+    /**
+     * 检查操作符
+     *
+     * @param mixed $ast AST 节点或数组
+     * @throws \RuntimeException 当发现不允许的操作符时抛出异常
+     */
+    private function checkOperators($ast): void
+    {
+        $this->traverseAst($ast, function($node) {
+            $type = $node['type'] ?? '';
+
+            // 检查是否是允许的操作符
+            if ($type !== '' && $type !== 'command' && $type !== 'subshell') {
+                if (!in_array($type, self::ALLOWED_OPERATORS)) {
+                    throw new \RuntimeException("不允许的操作符类型: {$type}");
+                }
+            }
+
+            // 检查后台执行
+            if (($node['background'] ?? false) === true) {
+                throw new \RuntimeException('不允许后台执行（&）');
+            }
+        });
+    }
+
+    /**
+     * 检查危险命令
+     *
+     * @param mixed $ast AST 节点或数组
+     * @throws \RuntimeException 当发现危险命令时抛出异常
+     */
+    private function checkDangerousCommands($ast): void
+    {
+        $this->traverseAst($ast, function($node) {
+            if (($node['type'] ?? '') === 'command') {
+                $commandName = $node['name'] ?? '';
+
+                // 检查是否是危险命令（支持精确匹配和前缀匹配）
+                foreach (self::DANGEROUS_COMMANDS as $dangerous) {
+                    // 精确匹配
+                    if ($commandName === $dangerous) {
+                        throw new \RuntimeException("不允许执行危险命令: {$commandName}");
+                    }
+
+                    // 前缀匹配（如 mkfs.ext4 匹配 mkfs）
+                    if (str_starts_with($commandName, $dangerous . '.')) {
+                        throw new \RuntimeException("不允许执行危险命令: {$commandName}");
+                    }
+
+                    // 路径中的危险命令（如 /sbin/mkfs）
+                    if (str_contains($commandName, '/' . $dangerous)) {
+                        throw new \RuntimeException("不允许执行危险命令: {$commandName}");
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * 检查特权提升
+     *
+     * @param mixed $ast AST 节点或数组
+     * @throws \RuntimeException 当发现特权提升时抛出异常
+     */
+    private function checkPrivilegeEscalation($ast): void
+    {
+        $this->traverseAst($ast, function($node) {
+            if (($node['type'] ?? '') === 'command') {
+                $commandName = $node['name'] ?? '';
+
+                // 检查是否是特权命令
+                if (in_array($commandName, self::PRIVILEGE_COMMANDS)) {
+                    throw new \RuntimeException("不允许执行特权命令: {$commandName}");
+                }
+            }
+        });
+    }
+
+    /**
+     * 检查危险参数组合
+     *
+     * @param mixed $ast AST 节点或数组
+     * @throws \RuntimeException 当发现危险参数时抛出异常
+     */
+    private function checkDangerousArgs($ast): void
+    {
+        $this->traverseAst($ast, function($node) {
+            if (($node['type'] ?? '') !== 'command') {
+                return;
+            }
+
+            $commandName = $node['name'] ?? '';
+            $args = $node['args'] ?? [];
+
+            // 检查特定命令的危险参数
+            switch ($commandName) {
+                case 'chmod':
+                    // 检查是否有 777 等过于宽松的权限
+                    foreach ($args as $arg) {
+                        if (preg_match('/^777$|^775$/', $arg)) {
+                            throw new \RuntimeException("不允许设置过于宽松的文件权限: {$arg}");
+                        }
+                    }
+                    break;
+
+                case 'chown':
+                    // 检查是否试图修改系统文件所有者
+                    foreach ($args as $arg) {
+                        if (str_starts_with($arg, '/etc/') || str_starts_with($arg, '/usr/')) {
+                            throw new \RuntimeException("不允许修改系统文件所有者: {$arg}");
+                        }
+                    }
+                    break;
+
+                case 'mv':
+                case 'cp':
+                    // 检查是否覆盖系统文件
+                    foreach ($args as $arg) {
+                        if (str_starts_with($arg, '/etc/') || str_starts_with($arg, '/usr/bin/')) {
+                            throw new \RuntimeException("不允许操作系统文件: {$arg}");
+                        }
+                    }
+                    break;
+
+                case 'curl':
+                case 'wget':
+                    // 检查是否下载到系统目录
+                    foreach ($args as $arg) {
+                        if (str_starts_with($arg, '-O') && isset($args[$i + 1])) {
+                            $nextArg = $args[$i + 1];
+                            if (str_starts_with($nextArg, '/usr/') || str_starts_with($nextArg, '/etc/')) {
+                                throw new \RuntimeException("不允许下载到系统目录: {$nextArg}");
+                            }
+                        }
+                    }
+                    break;
+            }
+        });
+    }
+
+    /**
+     * 遍历 AST 节点
+     *
+     * @param mixed $ast AST 节点或数组
+     * @param callable $callback 回调函数
+     */
+    private function traverseAst($ast, callable $callback): void
+    {
+        // 处理数组
+        if (is_array($ast) && isset($ast[0])) {
+            foreach ($ast as $node) {
+                $this->traverseAst($node, $callback);
+            }
+            return;
         }
-        // 检查其他危险字符
-        if (preg_match('/[;|`$()]/', $command)) {
-            throw new \RuntimeException('命令包含不安全的字符');
+
+        // 处理节点
+        if (is_array($ast) && isset($ast['type'])) {
+            $callback($ast);
+
+            // 递归处理 data 字段
+            $data = $ast['data'] ?? [];
+            if (is_array($data)) {
+                $this->traverseAst($data, $callback);
+            }
         }
+    }
+
+    /**
+     * 旧的安全检查方法（保留用于向后兼容，但已弃用）
+     * @deprecated 使用 deepSafetyCheck 代替
+     */
+    public function safetyCheck(string $command): void
+    {
+        $this->deepSafetyCheck($command);
     }
 }
