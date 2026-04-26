@@ -661,6 +661,12 @@ class Agent
 
         $this->sessionId = $sessionId;
         $loadedMessages = $session->getMessages();
+        $metadata = $session->getMetadata();
+
+        // 检查会话是否已有标题，如果有则标记为已生成
+        if (!empty($metadata['title'])) {
+            $this->titleGenerated = true;
+        }
 
         // 重新加载系统提示词文件组件（使用最新的文件内容）
         // 注意：不清空 systemPromptComponents，而是更新现有组件
