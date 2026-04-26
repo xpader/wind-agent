@@ -287,10 +287,27 @@ class TestAgentCommand extends Command
 
         // 使用迭代回调来显示每一步的执行过程
         $response = $agent->chat($message, function($iteration, $response, $toolResults) use ($output, &$shownToolCalls) {
-            // 先检查是否有工具调用，在显示响应前就显示工具信息
-            if ($response->hasToolCalls()) {
-                $output->writeln("<fg=cyan;options=bold>--- 第 {$iteration} 轮对话 ---</>");
+            // 显示轮次标题
+            $output->writeln("<fg=cyan;options=bold>--- 第 {$iteration} 轮对话 ---</>");
 
+            // 1. 先显示思考内容
+            if ($response->thinking !== '') {
+                $output->writeln('<fg=cyan;options=bold>========== Thinking ==========');
+                $output->writeln('<fg=cyan>' . $response->thinking . '</fg=cyan>');
+                $output->writeln('');
+                $output->writeln('');
+            }
+
+            // 2. 再显示响应内容
+            if ($response->content !== '') {
+                $output->writeln('<fg=green;options=bold>========== 内容输出 ==========');
+                $output->writeln('');
+                $output->writeln('<fg=green>' . $response->content . '</fg=green>');
+                $output->writeln('');
+            }
+
+            // 3. 最后显示工具调用
+            if ($response->hasToolCalls()) {
                 foreach ($response->toolCalls as $toolCall) {
                     $toolId = md5(json_encode($toolCall));
 
@@ -312,7 +329,7 @@ class TestAgentCommand extends Command
                 }
             }
 
-            // 显示工具调用消息（如果有工具执行结果）
+            // 4. 显示工具调用消息（如果有工具执行结果）
             if (count($toolResults) > 0) {
                 $output->writeln('<fg=gray;options=bold>[发送工具调用消息]</fg=gray;options=bold>');
                 foreach ($toolResults as $result) {
@@ -325,9 +342,6 @@ class TestAgentCommand extends Command
                 }
                 $output->writeln('');
             }
-
-            // 显示响应
-            $this->displayResponse($response, $output);
         });
 
         return $response;
@@ -360,7 +374,34 @@ class TestAgentCommand extends Command
                 $hasContent = false;
             }
 
-            // 处理工具调用
+            // 1. 先显示思考过程
+            if ($response->thinking !== '') {
+                // 每次开始新的思考过程时都显示标题
+                if (!$hasThinking) {
+                    $hasThinking = true;
+                    $output->writeln('<fg=cyan;options=bold>========== Thinking ==========');
+                }
+                // 使用 writeln 避免样式标签嵌套问题
+                $output->write('<fg=cyan>' . $response->thinking . '</fg=cyan>');
+            }
+
+            // 2. 再显示响应内容
+            if ($response->content !== '') {
+                // 每次开始新的响应内容时都显示标题
+                if (!$hasContent) {
+                    $hasContent = true;
+                    // 如果有思考过程，先添加一些空行分隔
+                    if ($hasThinking) {
+                        $output->writeln('');
+                        $output->writeln('');
+                    }
+                    $output->writeln('<fg=green;options=bold>========== 内容输出 ==========');
+                }
+                // 使用 writeln 避免样式标签嵌套问题
+                $output->write('<fg=green>' . $response->content . '</fg=green>');
+            }
+
+            // 3. 然后处理工具调用
             if (count($response->toolCalls) > 0) {
                 foreach ($response->toolCalls as $toolCall) {
                     $toolId = md5(json_encode($toolCall));
@@ -385,40 +426,13 @@ class TestAgentCommand extends Command
                 }
             }
 
-            // 显示工具消息（如果有的话）
+            // 4. 最后显示工具消息（如果有的话）
             if (count($toolMessages) > 0) {
                 $output->writeln('<fg=gray;options=bold>[发送工具调用消息]</fg=gray;options=bold>');
                 foreach ($toolMessages as $toolMessage) {
                     $output->writeln('<fg=gray>' . print_r($toolMessage, true) . '</fg=gray>');
                 }
                 $output->writeln('');
-            }
-
-            // 显示思考过程
-            if ($response->thinking !== '') {
-                // 每次开始新的思考过程时都显示标题
-                if (!$hasThinking) {
-                    $hasThinking = true;
-                    $output->writeln('<fg=cyan;options=bold>========== Thinking ==========');
-                }
-                // 使用 writeln 避免样式标签嵌套问题
-                $output->write('<fg=cyan>' . $response->thinking . '</fg=cyan>');
-            }
-
-            // 显示响应内容
-            if ($response->content !== '') {
-                // 每次开始新的响应内容时都显示标题
-                if (!$hasContent) {
-                    $hasContent = true;
-                    // 如果有思考过程，先添加一些空行分隔
-                    if ($hasThinking) {
-                        $output->writeln('');
-                        $output->writeln('');
-                    }
-                    $output->writeln('<fg=green;options=bold>========== 响应内容 ==========');
-                }
-                // 使用 writeln 避免样式标签嵌套问题
-                $output->write('<fg=green>' . $response->content . '</fg=green>');
             }
         });
 
