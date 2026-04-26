@@ -10,22 +10,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 开发命令
 
-### 启动应用
+### 启动应用（暂未实现 HTTP 服务器功能）
 ```bash
-# 启动 HTTP 服务器
-php start.php start
-
-# 以守护进程方式启动
-php start.php start -d
-
-# 停止服务
-php start.php stop
-
-# 重启服务
-php start.php restart
-
-# 平滑重启
-php start.php reload
+# 目前仅支持命令行工具
+./wind <command>
 ```
 
 ### 调试模式
@@ -175,7 +163,12 @@ composer install --no-dev --optimize-autoloader
 **平台适配器**
 - `OpenAiClient` - OpenAI API 兼容客户端
 - `OllamaClient` - Ollama 本地模型客户端
+- `AnthropicClient` - Anthropic/Claude Messages API 客户端
+- `MiniMaxClient` - MiniMax API 客户端
 - 各客户端负责将平台特定的请求/响应格式转换为统一的 `LLMRequest`/`LLMResponse`
+
+**客户端工厂**
+- `ClientFactory` - 统一管理客户端创建，根据配置自动实例化对应的 LLM 客户端
 
 **设计原则**
 - **消息组织抽象** - `LLMRequest` 统一管理消息和参数，简化调用
@@ -215,7 +208,7 @@ $client->chatStream($request, function(LLMResponse $response) {
 
 ### 工具调用架构
 
-项目实现了完整的 LLM 工具调用（Function Calling）支持，允许 AI 模型调用外部工具：
+项目实现了完整的 Tool Call 支持，允许 AI 模型调用外部工具：
 
 **核心组件**
 - `ToolInterface` - 工具接口，定义工具的标准契约
@@ -248,7 +241,8 @@ interface ToolInterface {
 **内置工具**
 - `ReadFileTool` - 读取文件内容
 - `WriteFileTool` - 写入文件内容
-- `ExecTool` - 执行 shell 命令（包含安全限制，禁止删除文件）
+- `EditFileTool` - 编辑文件内容（基于内容替换）
+- `ExecTool` - 执行 shell 命令（基于 AST 的安全策略，禁止危险操作）
 - `ReadSkillTool` - 读取 Skill 文档内容
 
 **工具调用流程**
@@ -276,9 +270,13 @@ interface ToolInterface {
 **设计原则**
 - **配置驱动** - 通过配置文件管理工具，方便启用/禁用
 - **接口统一** - 所有工具实现相同的接口
-- **安全优先** - 危险工具（如 ExecTool）默认禁用，包含安全检查
+- **安全优先** - 危险工具（如 ExecTool）默认禁用，包含基于 AST 的安全检查
 - **多轮对话** - 支持工具执行后的继续对话，使用 `addToolMessage()` 添加工具执行结果
 - **平台兼容** - 工具定义格式兼容 OpenAI API 标准
+
+**相关文档**
+- `docs/exec-tool-security.md` - ExecTool 安全策略详解
+- `docs/shell-parser.md` - Shell 命令解析器文档
 
 ### Skill 系统
 
@@ -502,6 +500,33 @@ commit 消息应该：
 ## 技术文档
 
 - `docs/php-tui.md` - php-tui 终端 UI 开发完整指南（核心概念、组件系统、事件处理、布局管理、常见问题、最佳实践）
+- `docs/exec-tool-security.md` - ExecTool 安全策略详解
+- `docs/shell-parser.md` - Shell 命令解析器文档
+- `docs/mcp-cache.md` - MCP 工具缓存机制详解
+
+### Agent 会话管理
+
+项目实现了完整的会话管理系统，支持多轮对话持久化：
+
+**核心组件**
+- `SessionManager` - 会话管理器，负责会话的创建、加载、保存、删除和列表
+- `Session` - 会话类，封装会话数据和元数据
+- 使用 JSONL 格式持久化到 `workspace/sessions/` 目录
+
+**主要功能**
+- 会话创建、加载、保存、删除
+- 首轮对话后自动生成会话标题
+- 会话恢复时自动更新系统提示词为最新版本
+- 支持会话列表查看
+
+**测试命令**
+```bash
+# 创建新会话或继续已有会话
+./wind test:agent --session <session-id>
+
+# 列出所有会话
+./wind test:agent --list-sessions
+```
 
 ## MCP (Model Context Protocol) 实现
 
@@ -559,12 +584,27 @@ commit 消息应该：
 # 列出 MCP 工具
 ./wind test:mcp --list-tools
 
+# 查看缓存状态
+./wind test:mcp --cache-status
+
+# 清除所有缓存
+./wind test:mcp --clear-cache
+
+# 清除指定服务器缓存
+./wind test:mcp --clear-server-cache <server>
+
+# 强制重新加载（跳过缓存）
+./wind test:mcp --no-cache
+
 # 在 Agent 中使用 MCP 工具
 ./wind test:agent --with-mcp --mcp-servers=fetch,exa
-
-# 测试 HTTP MCP 客户端
-php workspace/tests/test_mcp_http.php
 ```
+
+**工具缓存机制**
+- 自动缓存工具定义到 `workspace/states/mcp.cache.json`
+- 延迟初始化：使用缓存时，客户端连接延迟到首次工具调用时建立
+- 智能过期：每个服务器缓存 2 小时后自动过期
+- 配置检测：服务器配置变化时自动重新加载（基于 MD5 哈希）
 
 **重要：JSON-RPC 参数格式要求**
 MCP 协议和 Tool Call 都严格要求参数格式：
@@ -603,4 +643,10 @@ HTTP 传输：
 - 包含必需的 HTTP 头：Accept, MCP-Protocol-Version
 - 支持自定义认证头（Authorization, X-API-Key 等）
 
+**相关文档**
+- `docs/mcp-cache.md` - MCP 工具缓存机制详解
+
 - `docs/php-tui.md` - php-tui 终端 UI 开发完整指南（核心概念、组件系统、事件处理、布局管理、常见问题、最佳实践）
+- `docs/exec-tool-security.md` - ExecTool 安全策略详解
+- `docs/shell-parser.md` - Shell 命令解析器文档
+- `docs/mcp-cache.md` - MCP 工具缓存机制详解
