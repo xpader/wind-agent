@@ -80,6 +80,7 @@ class MiniMaxClient extends OpenAiClient
                         // 一次性包含：开始标签 + 思考内容 + 结束标签 + 普通内容
                         $newThinking = substr($remaining, 0, $closePos);
                         $newContent = substr($remaining, $closePos + strlen($thinkClose));
+                        $newContent = ltrim($newContent); // 清理思考标签残留的空白
                         // 不需要进入思考模式，因为已经结束了
                     } else {
                         // 只有开始标签 + 思考内容，进入思考模式
@@ -97,6 +98,7 @@ class MiniMaxClient extends OpenAiClient
                     // 找到结束标签，标签前的内容是思考内容，标签后的是普通内容
                     $newThinking = substr($content, 0, $closePos);
                     $newContent = substr($content, $closePos + strlen($thinkClose));
+                    $newContent = ltrim($newContent); // 清理思考标签残留的空白
                     $inThinking = false;
                 } else {
                     // 还没找到结束标签，全部都是思考内容
@@ -156,6 +158,8 @@ class MiniMaxClient extends OpenAiClient
 
         // 移除思考标签后的内容
         $content = $this->stripThinkingTags($response->content);
+        // 移除左侧的空白字符（包括思考标签残留的换行符）
+        $content = ltrim($content);
         $response->content($content);
 
         return $response;

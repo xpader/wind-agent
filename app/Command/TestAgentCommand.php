@@ -40,7 +40,9 @@ class TestAgentCommand extends Command
             ->addOption('with-skills', null, InputOption::VALUE_NONE, '启用技能支持')
             ->addOption('with-mcp', null, InputOption::VALUE_NONE, '启用 MCP 工具支持')
             ->addOption('mcp-servers', null, InputOption::VALUE_OPTIONAL, '指定启用的 MCP 服务器（逗号分隔）')
-            ->addOption('show-history', null, InputOption::VALUE_NONE, '显示完整消息历史');
+            ->addOption('show-history', null, InputOption::VALUE_NONE, '显示完整消息历史')
+            ->addOption('session', 'S', InputOption::VALUE_OPTIONAL, 'Session ID (恢复已有会话，留空则创建新会话)')
+            ->addOption('list-sessions', null, InputOption::VALUE_NONE, '列出所有会话');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output)
@@ -86,6 +88,45 @@ class TestAgentCommand extends Command
 
         // 显示标题和配置信息
         $this->displayHeader($output, $config);
+
+        // 处理 --list-sessions 参数
+        if ($config['listSessions']) {
+            $this->displaySessionsList($output);
+            return self::SUCCESS;
+        }
+
+        // 处理会话参数
+        $sessionId = $config['session'];
+        if ($sessionId !== null) {
+            if ($sessionId === '') {
+                // 创建新会话
+                $metadata = [
+                    'model' => $config['model'],
+                    'temperature' => $config['temperature'],
+                    'max_tokens' => $config['maxTokens'],
+                    'think' => $config['think'],
+                    'with_tools' => $config['withTools'],
+                    'with_skills' => $config['withSkills'],
+                    'with_mcp' => $config['withMcp'],
+                    'client_type' => $config['clientType'],
+                ];
+                $sessionId = $agent->createSession($metadata);
+                $agent->setAutoSave(true);
+                $output->writeln("<info>✓ 创建新会话: {$sessionId}</info>");
+                $output->writeln('');
+            } else {
+                // 加载已有会话
+                if (\App\Libs\Agent\SessionManager::exists($sessionId)) {
+                    $agent->loadSession($sessionId);
+                    $agent->setAutoSave(true);
+                    $output->writeln("<info>✓ 恢复会话: {$sessionId}</info>");
+                    $output->writeln('');
+                } else {
+                    $output->writeln("<error>✗ 会话不存在: {$sessionId}</error>");
+                    return self::FAILURE;
+                }
+            }
+        }
 
         try {
             // 如果提供了消息，执行对话
@@ -149,6 +190,8 @@ class TestAgentCommand extends Command
             'withMcp' => $input->getOption('with-mcp'),
             'mcpServers' => $input->getOption('mcp-servers') ?? '',
             'showHistory' => $input->getOption('show-history'),
+            'session' => $input->getOption('session'),
+            'listSessions' => $input->getOption('list-sessions'),
         ];
     }
 
@@ -465,6 +508,8 @@ class TestAgentCommand extends Command
         $output->writeln('<fg=white;options=bold>========================================</>');
         $output->writeln('<fg=white;options=bold>输入你的消息，按 Enter 发送</>');
         $output->writeln('<fg=white;options=bold>输入 "clear" 清空对话上下文</>');
+        $output->writeln('<fg=white;options=bold>输入 "save" 保存当前会话</>');
+        $output->writeln('<fg=white;options=bold>输入 "info" 显示会话信息</>');
         $output->writeln('<fg=white;options=bold>输入 "quit" 或 "exit" 退出</>');
         $output->writeln('<fg=white;options=bold>按 Ctrl+C 强制退出</>');
         $output->writeln('<fg=white;options=bold>========================================</>');
@@ -482,6 +527,14 @@ class TestAgentCommand extends Command
 
                 if ($answer === 'clear') {
                     return '__CLEAR__';  // 特殊标记表示清空上下文
+                }
+
+                if ($answer === 'save') {
+                    return '__SAVE__';  // 特殊标记表示保存会话
+                }
+
+                if ($answer === 'info') {
+                    return '__INFO__';  // 特殊标记表示显示会话信息
                 }
 
                 if ($answer === null || $answer === '') {
@@ -508,6 +561,20 @@ class TestAgentCommand extends Command
                     $agent->clearMessages();
                     $output->writeln('<fg=cyan>🗑️  对话上下文已清空</>');
                     $output->writeln('');
+                    continue;
+                }
+
+                // 检查是否保存会话
+                if ($userMessage === '__SAVE__') {
+                    $agent->saveSession();
+                    $output->writeln('<fg=cyan>💾 会话已保存</>');
+                    $output->writeln('');
+                    continue;
+                }
+
+                // 检查是否显示会话信息
+                if ($userMessage === '__INFO__') {
+                    $this->displaySessionInfo($agent, $output);
                     continue;
                 }
 
@@ -560,6 +627,88 @@ class TestAgentCommand extends Command
         $output->writeln("<error>错误类型:</error> " . get_class($e));
         $output->writeln("<error>错误消息:</error> {$e->getMessage()}");
         $output->writeln("<error>错误位置:</error> {$e->getFile()}:{$e->getLine()}");
+        $output->writeln('');
+    }
+
+    /**
+     * 显示会话信息
+     */
+    private function displaySessionInfo(Agent $agent, OutputInterface $output): void
+    {
+        $sessionId = $agent->getSessionId();
+
+        if ($sessionId === null) {
+            $output->writeln('<fg=yellow>⚠️  当前没有活动的会话</>');
+            $output->writeln('');
+            return;
+        }
+
+        $session = \App\Libs\Agent\SessionManager::load($sessionId);
+
+        if ($session === null) {
+            $output->writeln('<fg=yellow>⚠️  无法加载会话信息</>');
+            $output->writeln('');
+            return;
+        }
+
+        $metadata = $session->getMetadata();
+        $messages = $session->getMessages();
+
+        $output->writeln('');
+        $output->writeln('<fg=white;options=bold>========== 会话信息 ==========</>');
+        $output->writeln("<fg=cyan>会话 ID:</> {$sessionId}");
+        $output->writeln("<fg=cyan>创建时间:</> " . ($metadata['created_at'] ?? 'N/A'));
+        $output->writeln("<fg=cyan>更新时间:</> " . ($metadata['updated_at'] ?? 'N/A'));
+        $output->writeln("<fg=cyan>模型:</> " . ($metadata['model'] ?? 'N/A'));
+        $output->writeln("<fg=cyan>温度:</> " . ($metadata['temperature'] ?? 'N/A'));
+        $output->writeln("<fg=cyan>最大 Token:</> " . ($metadata['max_tokens'] ?? 'N/A'));
+        $output->writeln("<fg=cyan>思考模式:</> " . ($metadata['think'] ?? 'N/A'));
+        $output->writeln("<fg=cyan>工具调用:</> " . ($metadata['with_tools'] ? '启用' : '禁用'));
+        $output->writeln("<fg=cyan>技能支持:</> " . ($metadata['with_skills'] ? '启用' : '禁用'));
+        $output->writeln("<fg=cyan>MCP 支持:</> " . ($metadata['with_mcp'] ? '启用' : '禁用'));
+        $output->writeln("<fg=cyan>消息数量:</> " . count($messages));
+        $output->writeln('');
+    }
+
+    /**
+     * 显示所有会话列表
+     */
+    private function displaySessionsList(OutputInterface $output): void
+    {
+        $sessions = \App\Libs\Agent\SessionManager::listAll();
+
+        $output->writeln('');
+        $output->writeln('<fg=white;options=bold>========== 会话列表 ==========</>');
+        $output->writeln('');
+
+        if (count($sessions) === 0) {
+            $output->writeln('<fg=yellow>⚠️  暂无会话</>');
+            $output->writeln('');
+            return;
+        }
+
+        $output->writeln("<fg=cyan>找到 " . count($sessions) . " 个会话:</>");
+        $output->writeln('');
+
+        foreach ($sessions as $index => $session) {
+            $num = $index + 1;
+            $title = $session['title'] !== '' ? $session['title'] : '<fg=black;bg=white>未命名</>';
+
+            $output->writeln("<fg=white;options=bold>[{$num}]</> <fg=green;options=bold>{$title}</>");
+            $output->writeln("    <fg=cyan>会话 ID:</> <fg=yellow>{$session['session_id']}</>");
+
+            // 格式化时间显示
+            $createdAt = date('Y-m-d H:i:s', strtotime($session['created_at']));
+            $updatedAt = date('Y-m-d H:i:s', strtotime($session['updated_at']));
+
+            $output->writeln("    <fg=cyan>模型:</> {$session['model']}");
+            $output->writeln("    <fg=cyan>创建时间:</> {$createdAt}");
+            $output->writeln("    <fg=cyan>更新时间:</> {$updatedAt}");
+            $output->writeln("    <fg=cyan>消息数量:</> {$session['message_count']}");
+            $output->writeln('');
+        }
+
+        $output->writeln('<fg=green>提示:</> 使用 <fg=yellow>--session <会话ID></> 来恢复会话');
         $output->writeln('');
     }
 }

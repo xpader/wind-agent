@@ -55,6 +55,15 @@ class Agent
     /** 是否启用 MCP */
     private bool $withMcp = false;
 
+    /** 会话 ID */
+    private ?string $sessionId = null;
+
+    /** 是否自动保存 */
+    private bool $autoSave = false;
+
+    /** 是否已生成标题 */
+    private bool $titleGenerated = false;
+
     /**
      * 构造函数
      *
@@ -362,6 +371,16 @@ class Agent
         // 聊天结束后，检查并更新系统提示词
         $this->updateSystemPromptIfNeeded();
 
+        // 生成会话标题（第一轮对话后）
+        if ($this->sessionId !== null) {
+            $this->generateSessionTitle();
+        }
+
+        // 自动保存会话
+        if ($this->autoSave && $this->sessionId !== null) {
+            $this->saveSession();
+        }
+
         return $response;
     }
 
@@ -499,6 +518,16 @@ class Agent
         // 聊天结束后，检查并更新系统提示词
         $this->updateSystemPromptIfNeeded();
 
+        // 生成会话标题（第一轮对话后）
+        if ($this->sessionId !== null) {
+            $this->generateSessionTitle();
+        }
+
+        // 自动保存会话
+        if ($this->autoSave && $this->sessionId !== null) {
+            $this->saveSession();
+        }
+
         return $finalResponse;
     }
 
@@ -574,6 +603,205 @@ class Agent
     }
 
     /**
+     * 设置会话 ID
+     *
+     * @param string $sessionId 会话 ID
+     */
+    public function setSessionId(string $sessionId): void
+    {
+        $this->sessionId = $sessionId;
+    }
+
+    /**
+     * 获取会话 ID
+     *
+     * @return string|null
+     */
+    public function getSessionId(): ?string
+    {
+        return $this->sessionId;
+    }
+
+    /**
+     * 设置是否自动保存
+     *
+     * @param bool $enabled
+     */
+    public function setAutoSave(bool $enabled): void
+    {
+        $this->autoSave = $enabled;
+    }
+
+    /**
+     * 创建新会话
+     *
+     * @param array $metadata 会话元数据
+     * @return string 会话 ID
+     */
+    public function createSession(array $metadata): string
+    {
+        $sessionId = SessionManager::create($metadata);
+        $this->sessionId = $sessionId;
+        return $sessionId;
+    }
+
+    /**
+     * 加载会话
+     *
+     * @param string $sessionId 会话 ID
+     * @return bool 是否加载成功
+     */
+    public function loadSession(string $sessionId): bool
+    {
+        $session = SessionManager::load($sessionId);
+
+        if ($session === null) {
+            return false;
+        }
+
+        $this->sessionId = $sessionId;
+        $loadedMessages = $session->getMessages();
+
+        // 重新加载系统提示词文件组件（使用最新的文件内容）
+        // 注意：不清空 systemPromptComponents，而是更新现有组件
+        foreach ($this->systemPromptFiles as $file) {
+            $this->loadSystemPromptFileComponent($file);
+        }
+
+        // 添加技能组件（如果启用了技能）
+        if ($this->withSkills && $this->skillManager !== null) {
+            $this->updateSkillsComponent();
+        }
+
+        // 组装最新的系统消息（这会更新 $this->messages 中的系统消息）
+        $this->assembleSystemMessage();
+
+        // 获取内存中的系统消息
+        $currentSystemMessage = null;
+        foreach ($this->messages as $msg) {
+            if (($msg['role'] ?? '') === 'system') {
+                $currentSystemMessage = $msg;
+                break;
+            }
+        }
+
+        // 加载会话中的非系统消息
+        $this->messages = [];
+
+        // 先添加当前最新的系统消息
+        if ($currentSystemMessage !== null) {
+            $this->messages[] = $currentSystemMessage;
+        }
+
+        // 然后添加会话中的所有非系统消息
+        foreach ($loadedMessages as $message) {
+            if (($message['role'] ?? '') !== 'system') {
+                $this->messages[] = $message;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * 生成会话标题
+     *
+     * @return void
+     */
+    private function generateSessionTitle(): void
+    {
+        if ($this->sessionId === null || $this->titleGenerated) {
+            return;
+        }
+
+        // 提取首个 user 消息
+        $firstUserMessage = '';
+        $lastAssistantMessage = '';
+
+        foreach ($this->messages as $message) {
+            $role = $message['role'] ?? '';
+            if ($role === 'user' && $firstUserMessage === '') {
+                $firstUserMessage = $message['content'] ?? '';
+            }
+            if ($role === 'assistant') {
+                $lastAssistantMessage = $message['content'] ?? '';
+            }
+        }
+
+        if ($firstUserMessage === '') {
+            return;
+        }
+
+        try {
+            // 组合用户消息和助手回复来生成标题
+            $contentForTitle = "用户: " . $firstUserMessage;
+            if ($lastAssistantMessage !== '') {
+                $contentForTitle .= "\n助手: " . $lastAssistantMessage;
+            }
+
+            // 使用 LLM 生成标题
+            $request = \App\Libs\LLM\LLMRequest::create();
+            $request->addSystem('你是一个专业的对话标题生成助手。请根据对话内容生成一个简洁、准确的对话标题。标题应该：
+1. 简洁明了，不超过20个字符
+2. 准确概括对话的主题
+3. 使用中文
+4. 不要使用标点符号
+5. 只返回标题，不要任何解释或额外内容');
+            $request->addUser("请为以下对话生成一个标题：\n\n" . $contentForTitle);
+            $request->model($this->model);
+            $request->temperature(0.3);
+            $request->maxTokens(1000);
+            $request->think(false); // 关闭 Think 模式
+
+            $response = $this->provider->chat($request);
+            $title = trim($response->content);
+
+            // 清理标题（移除可能的引号、标点等）
+            $search = ['"', '"', '\'', '\'', '\'', '。', '！', '？', '~', '…'];
+            $title = str_replace($search, '', $title);
+            $title = mb_substr($title, 0, 50, 'UTF-8');
+
+            if ($title !== '') {
+                SessionManager::updateTitle($this->sessionId, $title);
+                $this->titleGenerated = true;
+            }
+        } catch (\Throwable $e) {
+            // 生成标题失败不影响对话流程
+            error_log("生成会话标题失败: " . $e->getMessage());
+            $this->titleGenerated = true; // 标记为已尝试，避免重复
+        }
+    }
+
+    /**
+     * 保存当前会话状态
+     *
+     * @return void
+     */
+    public function saveSession(): void
+    {
+        if ($this->sessionId === null) {
+            return;
+        }
+
+        // 保存所有新增的消息
+        $session = SessionManager::load($this->sessionId);
+        if ($session !== null) {
+            $savedMessages = $session->getMessages();
+            $messageCount = count($savedMessages);
+
+            // 只保存新增的消息
+            for ($i = $messageCount; $i < count($this->messages); $i++) {
+                SessionManager::saveMessage($this->sessionId, $this->messages[$i]);
+            }
+
+            // 更新元数据
+            SessionManager::updateMetadata($this->sessionId, [
+                'updated_at' => date('c'),
+            ]);
+        }
+    }
+
+    /**
      * 获取消息历史
      *
      * @return array
@@ -598,6 +826,13 @@ class Agent
         });
 
         $this->messages = array_values($systemMessages);
+
+        // 更新会话元数据
+        if ($this->autoSave && $this->sessionId !== null) {
+            SessionManager::updateMetadata($this->sessionId, [
+                'updated_at' => date('c'),
+            ]);
+        }
     }
 
     /**
