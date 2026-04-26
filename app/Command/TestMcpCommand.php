@@ -26,7 +26,11 @@ class TestMcpCommand extends Command
             ->addOption('server', 's', InputOption::VALUE_OPTIONAL, '指定 MCP 服务器名称')
             ->addOption('test-call', null, InputOption::VALUE_OPTIONAL, '测试工具调用（格式：server_tool_name 或 tool_name）')
             ->addOption('test-args', null, InputOption::VALUE_OPTIONAL, '工具调用参数（JSON 格式）', '{}')
-            ->addOption('init-only', null, InputOption::VALUE_NONE, '仅初始化，不执行任何操作');
+            ->addOption('init-only', null, InputOption::VALUE_NONE, '仅初始化，不执行任何操作')
+            ->addOption('cache-status', null, InputOption::VALUE_NONE, '显示缓存状态')
+            ->addOption('clear-cache', null, InputOption::VALUE_NONE, '清除所有缓存')
+            ->addOption('clear-server-cache', null, InputOption::VALUE_OPTIONAL, '清除指定服务器的缓存')
+            ->addOption('no-cache', null, InputOption::VALUE_NONE, '禁用缓存，强制重新加载');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output)
@@ -37,11 +41,40 @@ class TestMcpCommand extends Command
         $output->writeln('<fg=blue;options=bold>========================================</>');
         $output->writeln('');
 
+        // 处理缓存相关操作（不需要初始化）
+        if ($input->getOption('clear-cache')) {
+            $output->writeln('<fg=yellow>正在清除所有缓存...</>');
+            McpManager::clearCache();
+            $output->writeln('<fg=green>✓ 缓存已清除</>');
+            $output->writeln('');
+            return self::SUCCESS;
+        }
+
+        if ($input->getOption('clear-server-cache')) {
+            $serverName = $input->getOption('clear-server-cache');
+            $output->writeln("<fg=yellow>正在清除服务器 {$serverName} 的缓存...</>");
+            McpManager::clearServerCache($serverName);
+            $output->writeln('<fg=green>✓ 缓存已清除</>');
+            $output->writeln('');
+            return self::SUCCESS;
+        }
+
+        if ($input->getOption('cache-status')) {
+            $this->showCacheStatus($output);
+            return self::SUCCESS;
+        }
+
         try {
             // 初始化 MCP 管理器
             $server = $input->getOption('server');
             // 只有当明确指定了服务器名称时才限制初始化的服务器列表
             $enabledServers = ($server !== null && $server !== '') ? [$server] : null;
+
+            // 禁用缓存
+            if ($input->getOption('no-cache')) {
+                $output->writeln('<fg=yellow>禁用缓存，强制重新加载...</>');
+                McpManager::clearCache();
+            }
 
             $output->writeln('<fg=yellow>正在初始化 MCP 管理器...</>');
             if ($enabledServers !== null) {
@@ -305,5 +338,46 @@ class TestMcpCommand extends Command
         $output->writeln("<error>错误消息:</error> {$e->getMessage()}");
         $output->writeln("<error>错误位置:</error> {$e->getFile()}:{$e->getLine()}");
         $output->writeln('');
+    }
+
+    /**
+     * 显示缓存状态
+     */
+    private function showCacheStatus(OutputInterface $output): void
+    {
+        $status = McpManager::getCacheStatus();
+
+        $output->writeln('<fg=cyan;options=bold>========== MCP 缓存状态 ==========</>');
+
+        if (!$status['exists']) {
+            $output->writeln('<fg=yellow>缓存文件不存在</>');
+            $output->writeln('');
+            return;
+        }
+
+        $output->writeln('<fg=green>缓存文件存在</>');
+        $output->writeln('');
+
+        if (count($status['servers']) === 0) {
+            $output->writeln('<fg=yellow>没有缓存的工具定义</>');
+            $output->writeln('');
+            return;
+        }
+
+        foreach ($status['servers'] as $serverName => $serverStatus) {
+            $output->writeln("<fg=green>服务器:</fg=green> {$serverName}");
+            $output->writeln("<info>  缓存时间:</info> {$serverStatus['cached_at']}");
+            $output->writeln("<info>  缓存时长:</info> {$serverStatus['age_seconds']} 秒");
+
+            if ($serverStatus['expired']) {
+                $output->writeln("<fg=red>  状态: 已过期</>");
+            } else {
+                $remaining = 7200 - $serverStatus['age_seconds'];
+                $output->writeln("<fg=green>  状态: 有效</> (剩余 {$remaining} 秒)");
+            }
+
+            $output->writeln("<info>  工具数量:</info> {$serverStatus['tool_count']}");
+            $output->writeln('');
+        }
     }
 }

@@ -91,6 +91,8 @@ class McpToolWrapper implements ToolInterface
         $toolName = $this->toolDefinition['name'] ?? '';
 
         try {
+            // 确保客户端已初始化（延迟初始化）
+            $this->client->initialize();
             return $this->client->callTool($toolName, $arguments);
         } catch (\Throwable $e) {
             return "[MCP 工具调用失败] {$this->getName()}: " . $e->getMessage();
