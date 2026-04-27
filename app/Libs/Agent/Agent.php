@@ -642,6 +642,7 @@ class Agent
     {
         $sessionId = SessionManager::create($metadata);
         $this->sessionId = $sessionId;
+        $this->titleGenerated = false;  // 重置标题生成标志，新会话需要生成标题
         return $sessionId;
     }
 
@@ -832,13 +833,6 @@ class Agent
         });
 
         $this->messages = array_values($systemMessages);
-
-        // 更新会话元数据
-        if ($this->autoSave && $this->sessionId !== null) {
-            SessionManager::updateMetadata($this->sessionId, [
-                'updated_at' => date('c'),
-            ]);
-        }
     }
 
     /**

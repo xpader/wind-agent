@@ -8,6 +8,67 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **PHP 版本**：8.1.33
 
+## 技术文档索引
+
+项目提供了详细的技术文档，涵盖各个核心功能的实现细节和使用指南：
+
+### 核心功能文档
+- **`docs/session-management.md`** - Agent 会话管理详解
+  - 会话生命周期（延迟创建、恢复、清理）
+  - 会话持久化机制和存储格式
+  - 自动标题生成和元数据管理
+  - SessionManager API 参考
+
+- **`docs/mcp.md`** - MCP (Model Context Protocol) 实现详解
+  - MCP 客户端架构和接口设计
+  - stdio 和 HTTP 两种传输方式
+  - 服务器配置和工具适配
+  - 已测试的 MCP 服务器列表
+
+- **`docs/mcp-cache.md`** - MCP 工具缓存机制详解
+  - 缓存策略和智能过期机制
+  - 延迟初始化和配置检测
+  - 缓存管理命令和故障排查
+
+### UI 开发文档
+- **`docs/php-tui.md`** - php-tui 终端 UI 开发完整指南
+  - 核心概念和组件系统
+  - 事件处理和布局管理
+  - 常见问题和最佳实践
+  - TUI Demo 使用说明
+
+### 安全和工具文档
+- **`docs/exec-tool-security.md`** - ExecTool 安全策略详解
+  - 基于 AST 的命令解析和验证
+  - 危险操作检测和防护机制
+  - 安全策略配置方法
+
+- **`docs/shell-parser.md`** - Shell 命令解析器文档
+  - 命令解析流程和语法树构建
+  - 管道、重定向和命令替换支持
+  - 解析器 API 使用示例
+
+### 其他专题文档
+- **`docs/web-search-tool.md`** - Web 搜索工具实现
+- **`docs/web-search-quickstart.md`** - Web 搜索快速入门
+- **`docs/time-tool.md`** - 时间工具使用说明
+- **`docs/TUI_DEMO_README.md`** - TUI 演示程序说明
+
+**使用建议**：
+- 开发前先阅读相关功能的文档，了解设计思路
+- 遇到问题时查阅对应的专题文档
+- 新增功能时参考现有文档的编写风格
+
+**⚠️ 文档维护要求**：
+- **代码变更必须同步更新文档**：如果修改了文档中描述的相关代码功能，必须及时更新对应的文档内容
+- **保持文档一致性**：文档中的示例代码、配置说明、API 描述等必须与实际代码保持一致
+- **版本化文档更新**：在文档末尾添加更新记录，注明修改日期和变更内容
+- **定期审查**：定期检查文档的准确性，特别是代码重构后要验证文档是否仍然适用
+- **双向同步**：
+  - 修改实现逻辑时 → 更新文档中的技术说明和示例
+  - 新增功能时 → 补充或创建对应的技术文档
+  - 发现文档错误时 → 立即修正文档内容
+
 ## 开发命令
 
 ### 启动应用（暂未实现 HTTP 服务器功能）
@@ -406,6 +467,45 @@ metadata:
 ./wind test:chat --prompt "测试" --show-raw
 ```
 
+**Agent 会话测试 (test:agent)**
+```bash
+# 基本会话测试（延迟创建会话）
+./wind test:agent
+
+# 恢复已有会话
+./wind test:agent --session <session-id>
+
+# 列出所有会话
+./wind test:agent --list-sessions
+
+# 使用指定客户端
+./wind test:agent --client openai --host localhost:11434
+
+# 启用工具调用
+./wind test:agent --with-tools
+
+# 启用技能支持
+./wind test:agent --with-skills
+
+# 启用 MCP 工具
+./wind test:agent --with-mcp --mcp-servers=fetch,exa
+
+# 交互模式（自动进入，如果不指定 --message）
+./wind test:agent --interactive
+
+# 发送单条消息
+./wind test:agent --message "你好"
+
+# 流式输出
+./wind test:agent --stream --message "写一首诗"
+```
+
+**交互模式命令**（在 test:agent 交互模式中）：
+- `clear` - 清空对话上下文，脱离旧会话，准备创建新会话
+- `save` - 手动保存当前会话
+- `info` - 显示当前会话信息
+- `quit` 或 `exit` - 退出交互模式
+
 **专用测试命令**
 ```bash
 # 工具调用专用测试
@@ -506,147 +606,59 @@ commit 消息应该：
 
 ### Agent 会话管理
 
-项目实现了完整的会话管理系统，支持多轮对话持久化：
+项目实现了完整的会话管理系统，支持多轮对话持久化。
 
-**核心组件**
-- `SessionManager` - 会话管理器，负责会话的创建、加载、保存、删除和列表
-- `Session` - 会话类，封装会话数据和元数据
-- 使用 JSONL 格式持久化到 `workspace/sessions/` 目录
+**核心特性**
+- 延迟创建会话（启动时不立即创建，第一条消息时才创建）
+- 自动保存对话历史（JSONL 格式）
+- 首轮对话后自动生成标题
+- clear 命令清空上下文并创建新会话（旧会话保留）
 
-**主要功能**
-- 会话创建、加载、保存、删除
-- 首轮对话后自动生成会话标题
-- 会话恢复时自动更新系统提示词为最新版本
-- 支持会话列表查看
-
-**测试命令**
+**快速开始**
 ```bash
-# 创建新会话或继续已有会话
-./wind test:agent --session <session-id>
+# 创建新会话
+./wind test:agent
 
-# 列出所有会话
+# 恢复已有会话（支持数字编号或完整会话 ID）
+./wind test:agent --session 1           # 使用编号恢复
+./wind test:agent --session <session-id>  # 使用完整 ID 恢复
+
+# 列出所有会话（显示编号和完整 ID）
 ./wind test:agent --list-sessions
+
+# 交互模式
+> clear    # 清空上下文，创建新会话
+> info     # 显示会话信息
+> save     # 手动保存会话
 ```
+
+**详细文档**：详见 `docs/session-management.md` - Agent 会话管理详解
 
 ## MCP (Model Context Protocol) 实现
 
 项目实现了完整的 MCP 客户端支持，允许 AI Agent 调用 MCP 服务器提供的工具。
 
-**核心实现**
-- `McpClientInterface` - MCP 客户端统一接口
-- `McpStdioClient` - stdio 传输客户端（使用原生 PHP proc_open）
-- `McpHttpClient` - HTTP 传输客户端（基于 Streamable HTTP 规范）
-- `McpManager` - MCP 服务器和工具管理器
-- `McpToolWrapper` - 将 MCP 工具适配到 ToolInterface
+**核心特性**
+- 支持 stdio 和 HTTP 两种传输方式
+- 自动工具缓存和延迟初始化
+- 统一的工具适配接口（ToolInterface）
+- 完整的会话管理支持
 
-**配置文件**
-- `config/mcp.php` - MCP 服务器配置
-
-**支持两种传输方式**
-
-1. **stdio 传输**（本地进程）
-   - 使用 `command` 和 `args` 启动本地 MCP 服务器进程
-   - 适用于本地工具和脚本
-   - 示例：fetch, minimax, brave-search, github, memory
-
-2. **HTTP 传输**（远程服务器）
-   - 使用 `url` 连接远程 MCP 服务器
-   - 可选 `headers` 用于认证
-   - 适用于云服务和远程 MCP 端点
-   - 示例：exa (https://mcp.exa.ai/mcp)
-
-**配置示例**
-
-```php
-// stdio 传输（本地进程）
-'fetch' => [
-    'enabled' => env('MCP_FETCH') === true,
-    'command' => 'npx',
-    'args' => ['-y', '@tokenizin/mcp-npx-fetch'],
-    'env' => [],
-],
-
-// HTTP 传输（远程服务器）
-'exa' => [
-    'enabled' => env('MCP_EXA') === true,
-    'url' => 'https://mcp.exa.ai/mcp',
-    'headers' => [
-        'Authorization' => 'Bearer ' . env('MCP_EXA_API_KEY', ''),
-    ],
-],
-```
-
-**测试命令**
+**快速开始**
 ```bash
-# 列出 MCP 服务器
-./wind test:mcp --list-servers
-
-# 列出 MCP 工具
-./wind test:mcp --list-tools
-
-# 查看缓存状态
-./wind test:mcp --cache-status
-
-# 清除所有缓存
-./wind test:mcp --clear-cache
-
-# 清除指定服务器缓存
-./wind test:mcp --clear-server-cache <server>
-
-# 强制重新加载（跳过缓存）
-./wind test:mcp --no-cache
-
-# 在 Agent 中使用 MCP 工具
+# 在 Agent 中启用 MCP 工具
 ./wind test:agent --with-mcp --mcp-servers=fetch,exa
+
+# 测试 MCP 连接
+./wind test:mcp --list-servers
+./wind test:mcp --list-tools
 ```
 
-**工具缓存机制**
-- 自动缓存工具定义到 `workspace/states/mcp.cache.json`
-- 延迟初始化：使用缓存时，客户端连接延迟到首次工具调用时建立
-- 智能过期：每个服务器缓存 2 小时后自动过期
-- 配置检测：服务器配置变化时自动重新加载（基于 MD5 哈希）
+**重要提示**
+- MCP 协议严格要求 JSON-RPC 参数格式：空参数必须是对象 `{}` 而不是数组 `[]`
+- 配置文件：`config/mcp.php`
+- 缓存文件：`workspace/states/mcp.cache.json`
 
-**重要：JSON-RPC 参数格式要求**
-MCP 协议和 Tool Call 都严格要求参数格式：
-- **空参数必须是对象 `{}` 而不是数组 `[]`**
-- 正确：`'params' => new \stdClass()` 生成 `"params": {}`
-- 错误：`'params' => []` 生成 `"params": []`
-- 服务器会拒绝空数组格式，返回 "Invalid input: expected object, received array" 错误
-- 有参数时使用关联数组：`'params' => ['url' => 'xxx']` 生成 `"params": {"url": "xxx"}`
-- 这个要求同时适用于：stdio 和 HTTP 两种传输方式
-
-**已测试的 MCP 服务器**
-
-stdio 传输：
-- `@tokenizin/mcp-npx-fetch` - HTTP 请求工具（fetch_html, fetch_markdown, fetch_txt, fetch_json）
-- `@modelcontextprotocol/server-brave-search` - Brave 搜索
-- `@modelcontextprotocol/server-github` - GitHub 集成
-- `@modelcontextprotocol/server-memory` - 内存存储
-- `minimax-coding-plan-mcp` - MiniMax 编码计划
-
-HTTP 传输：
-- `exa` - AI 搜索服务 (https://mcp.exa.ai/mcp)
-
-**关键实现细节**
-
-stdio 传输：
-- 使用 `proc_open()` 和管道进行 stdio 通信
-- 使用 `fgets()` 阻塞读取 JSON-RPC 响应
-- 使用 `fflush()` 确保数据立即发送
-- 在发送 `initialized` 通知后需要 `sleep(1)` 延迟
-- 必须正确设置 PATH 环境变量以便 `npx` 找到 MCP 服务器
-
-HTTP 传输：
-- 使用 AMPHP HttpClient 发送 HTTP POST 请求
-- 支持 MCP 会话管理（MCP-Session-Id）
-- 遵循 MCP Streamable HTTP 规范（2025-11-25）
-- 包含必需的 HTTP 头：Accept, MCP-Protocol-Version
-- 支持自定义认证头（Authorization, X-API-Key 等）
-
-**相关文档**
-- `docs/mcp-cache.md` - MCP 工具缓存机制详解
-
-- `docs/php-tui.md` - php-tui 终端 UI 开发完整指南（核心概念、组件系统、事件处理、布局管理、常见问题、最佳实践）
-- `docs/exec-tool-security.md` - ExecTool 安全策略详解
-- `docs/shell-parser.md` - Shell 命令解析器文档
+**详细文档**：
+- `docs/mcp.md` - MCP 协议实现详解
 - `docs/mcp-cache.md` - MCP 工具缓存机制详解

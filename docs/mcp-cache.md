@@ -167,3 +167,8 @@ private static int $cacheTtl = 7200; // 默认 2 小时
 
 - [MCP 协议实现](./mcp.md)
 - [Agent 系统文档](../workspace/AGENTS.md)
+
+## 文档更新记录
+
+**2026-04-26**
+- 初始版本，详细说明 MCP 工具缓存机制的设计和实现

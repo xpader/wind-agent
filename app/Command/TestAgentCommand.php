@@ -97,40 +97,61 @@ class TestAgentCommand extends Command
 
         // 处理会话参数
         $sessionId = $config['session'];
-        if ($sessionId !== null) {
-            if ($sessionId === '') {
-                // 创建新会话
-                $metadata = [
-                    'model' => $config['model'],
-                    'temperature' => $config['temperature'],
-                    'max_tokens' => $config['maxTokens'],
-                    'think' => $config['think'],
-                    'with_tools' => $config['withTools'],
-                    'with_skills' => $config['withSkills'],
-                    'with_mcp' => $config['withMcp'],
-                    'client_type' => $config['clientType'],
-                ];
-                $sessionId = $agent->createSession($metadata);
+        $autoCreateSession = false;  // 标记是否需要自动创建会话
+
+        if (!$sessionId) {
+            // 延迟创建会话：在第一条消息时才创建
+            $autoCreateSession = true;
+            $agent->setAutoSave(true);
+            $output->writeln("<info>会话模式: 新会话</info>");
+            $output->writeln('');
+        } else {
+            // 检查是否使用数字编号恢复会话
+            $resolvedSessionId = $this->resolveSessionId($sessionId);
+            if ($resolvedSessionId === null) {
+                $output->writeln("<error>✗ 无效的会话编号或 ID: {$sessionId}</error>");
+                $output->writeln("<comment>提示: 使用 --list-sessions 查看所有会话</>");
+                return self::FAILURE;
+            }
+
+            // 加载已有会话
+            if (\App\Libs\Agent\SessionManager::exists($resolvedSessionId)) {
+                $agent->loadSession($resolvedSessionId);
                 $agent->setAutoSave(true);
-                $output->writeln("<info>✓ 创建新会话: {$sessionId}</info>");
+
+                // 显示会话信息
+                if ($sessionId !== $resolvedSessionId) {
+                    $output->writeln("<info>会话模式: 恢复会话 #{$sessionId} ({$resolvedSessionId})</info>");
+                } else {
+                    $output->writeln("<info>会话模式: 恢复会话 {$resolvedSessionId}</info>");
+                }
                 $output->writeln('');
             } else {
-                // 加载已有会话
-                if (\App\Libs\Agent\SessionManager::exists($sessionId)) {
-                    $agent->loadSession($sessionId);
-                    $agent->setAutoSave(true);
-                    $output->writeln("<info>✓ 恢复会话: {$sessionId}</info>");
-                    $output->writeln('');
-                } else {
-                    $output->writeln("<error>✗ 会话不存在: {$sessionId}</error>");
-                    return self::FAILURE;
-                }
+                $output->writeln("<error>✗ 会话不存在: {$resolvedSessionId}</error>");
+                return self::FAILURE;
             }
         }
 
         try {
             // 如果提供了消息，执行对话
             if ($config['userMessage']) {
+                // 如果需要自动创建会话，先创建
+                if ($autoCreateSession) {
+                    $metadata = [
+                        'model' => $config['model'],
+                        'temperature' => $config['temperature'],
+                        'max_tokens' => $config['maxTokens'],
+                        'think' => $config['think'],
+                        'with_tools' => $config['withTools'],
+                        'with_skills' => $config['withSkills'],
+                        'with_mcp' => $config['withMcp'],
+                        'client_type' => $config['clientType'],
+                    ];
+                    $sessionId = $agent->createSession($metadata);
+                    $output->writeln("<info>✓ 创建会话: {$sessionId}</info>");
+                    $output->writeln('');
+                }
+
                 // 执行对话
                 if ($config['useStream']) {
                     $response = $this->executeStreamChat($agent, $config, $output);
@@ -518,6 +539,8 @@ class TestAgentCommand extends Command
     private function runInteractiveLoop(Agent $agent, array $config, InputInterface $input, OutputInterface $output): void
     {
         $questionHelper = new QuestionHelper();
+        $autoCreateSession = !$config['session'];  // 是否需要自动创建会话
+        $sessionCreated = false;  // 会话是否已创建
 
         $output->writeln('<fg=white;options=bold>========================================</>');
         $output->writeln('<fg=white;options=bold>输入你的消息，按 Enter 发送</>');
@@ -572,8 +595,21 @@ class TestAgentCommand extends Command
 
                 // 检查是否清空上下文
                 if ($userMessage === '__CLEAR__') {
+                    $oldSessionId = $agent->getSessionId();
                     $agent->clearMessages();
-                    $output->writeln('<fg=cyan>🗑️  对话上下文已清空</>');
+
+                    // 标记需要创建新会话（在下次发送消息时创建）
+                    $autoCreateSession = true;
+                    $sessionCreated = false;
+
+                    if ($oldSessionId) {
+                        $output->writeln("<fg=cyan>🗑️  对话上下文已清空</>");
+                        $output->writeln("<fg=cyan>📁 旧会话保留: {$oldSessionId}</>");
+                        $output->writeln("<fg=cyan>✨ 将创建新会话</>");
+                    } else {
+                        $output->writeln("<fg=cyan>🗑️  对话上下文已清空</>");
+                        $output->writeln("<fg=cyan>✨ 将创建新会话</>");
+                    }
                     $output->writeln('');
                     continue;
                 }
@@ -595,6 +631,24 @@ class TestAgentCommand extends Command
                 // 跳过空输入
                 if ($userMessage === '') {
                     continue;
+                }
+
+                // 如果需要自动创建会话，在第一条消息时创建
+                if ($autoCreateSession && !$sessionCreated) {
+                    $metadata = [
+                        'model' => $config['model'],
+                        'temperature' => $config['temperature'],
+                        'max_tokens' => $config['maxTokens'],
+                        'think' => $config['think'],
+                        'with_tools' => $config['withTools'],
+                        'with_skills' => $config['withSkills'],
+                        'with_mcp' => $config['withMcp'],
+                        'client_type' => $config['clientType'],
+                    ];
+                    $sessionId = $agent->createSession($metadata);
+                    $output->writeln("<info>✓ 创建会话: {$sessionId}</info>");
+                    $output->writeln('');
+                    $sessionCreated = true;
                 }
 
                 $output->writeln('');
@@ -722,7 +776,30 @@ class TestAgentCommand extends Command
             $output->writeln('');
         }
 
-        $output->writeln('<fg=green>提示:</> 使用 <fg=yellow>--session <会话ID></> 来恢复会话');
+        $output->writeln('<fg=green>提示:</> 使用 <fg=yellow>--session <编号|会话ID></> 来恢复会话（例如：--session 1 或 --session xxx-xxx-xxx）');
         $output->writeln('');
+    }
+
+    /**
+     * 解析会话 ID（支持数字编号）
+     *
+     * @param string $input 用户输入的会话编号或 ID
+     * @return string|null 解析后的会话 ID，无效时返回 null
+     */
+    private function resolveSessionId(string $input): ?string
+    {
+        // 如果是纯数字，当作会话编号处理
+        if (ctype_digit($input)) {
+            $index = (int)$input - 1;  // 转换为数组索引（从 0 开始）
+            $sessions = \App\Libs\Agent\SessionManager::listAll();
+
+            if ($index >= 0 && $index < count($sessions)) {
+                return $sessions[$index]['session_id'];
+            }
+            return null;
+        }
+
+        // 否则直接当作会话 ID 返回
+        return $input;
     }
 }
