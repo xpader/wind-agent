@@ -93,6 +93,15 @@ return [
             //     'top_p' => 1.0,
             // ],
         ],
+
+        /**
+         * 智谱 Coding Plan (GLM) 配置
+         */
+        'zai-coding-plan' => [
+            'client' => 'openai', // 使用 OpenAI 兼容接口
+            'api_key' => env('ZHIPU_API_KEY', ''),
+            'base_url' => 'https://open.bigmodel.cn/api/coding/paas/v4/',
+        ],
     ],
 
     /**

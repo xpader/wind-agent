@@ -529,6 +529,16 @@ class TestAgentCommand extends Command
             return 256000;
         }
 
+        // GLM 系列
+        // glm-4 或 glm-4.5 开头 - 128k
+        if (preg_match('/^glm-4(\.5)?($|[^0-9])/i', $model)) {
+            return 128000;
+        }
+        // glm-4.6+ 或 glm-5. 开头 - 200k
+        if (preg_match('/^glm-4\.([6-9]|[1-9][0-9])/i', $model) || preg_match('/^glm-5(\.|$)/i', $model)) {
+            return 200000;
+        }
+
         // Qwen 3.5 小参数系列 - 64k
         if (preg_match('/^qwen3\.5:(0\.8|4|9)b/i', $model)) {
             return 64000;
