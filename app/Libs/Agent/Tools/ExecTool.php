@@ -28,7 +28,7 @@ class ExecTool implements ToolInterface
 
     public function getDescription(): string
     {
-        return '执行 shell 命令并返回结果（注意：有安全风险，谨慎使用）';
+        return '执行 shell 命令并返回结果';
     }
 
     public function getParameters(): array
@@ -195,12 +195,25 @@ class ExecTool implements ToolInterface
      */
     private function checkDangerousCommands($ast): void
     {
-        $this->traverseAst($ast, function($node) {
+        $workspaceDir = $this->getWorkspaceDir();
+
+        $this->traverseAst($ast, function($node) use ($workspaceDir) {
             if (($node['type'] ?? '') === 'command') {
                 $commandName = $node['name'] ?? '';
 
-                // 检查是否是危险命令（支持精确匹配和前缀匹配）
+                // 特殊处理 rm 命令
+                if ($commandName === 'rm') {
+                    $this->checkRmCommand($node, $workspaceDir);
+                    return;
+                }
+
+                // 检查其他危险命令（支持精确匹配和前缀匹配）
                 foreach (self::DANGEROUS_COMMANDS as $dangerous) {
+                    // 跳过 rm（已单独处理）
+                    if ($dangerous === 'rm') {
+                        continue;
+                    }
+
                     // 精确匹配
                     if ($commandName === $dangerous) {
                         throw new \RuntimeException("不允许执行危险命令: {$commandName}");
@@ -218,6 +231,126 @@ class ExecTool implements ToolInterface
                 }
             }
         });
+    }
+
+    /**
+     * 检查 rm 命令的安全性
+     *
+     * @param array $node 命令节点
+     * @param string $workspaceDir workspace 目录路径
+     * @throws \RuntimeException 当 rm 命令不安全时抛出异常
+     */
+    private function checkRmCommand(array $node, string $workspaceDir): void
+    {
+        $args = $node['args'] ?? [];
+
+        // 检查危险选项
+        $hasRecursive = in_array('-r', $args) || in_array('-rf', $args) ||
+                        in_array('--recursive', $args) || in_array('-fr', $args);
+        $hasForce = in_array('-f', $args) || in_array('--force', $args);
+        $hasNoPreserveRoot = in_array('--no-preserve-root', $args);
+
+        if ($hasNoPreserveRoot) {
+            throw new \RuntimeException("不允许使用 --no-preserve-root 选项");
+        }
+
+        // 提取路径参数（跳过选项）
+        $paths = [];
+        for ($i = 0; $i < count($args); $i++) {
+            $arg = $args[$i];
+            // 跳过选项（以 - 开头）
+            if (!str_starts_with($arg, '-')) {
+                $paths[] = $arg;
+            }
+        }
+
+        // 检查所有路径是否都在 workspace 内
+        foreach ($paths as $path) {
+            // 解析路径
+            $realPath = $this->resolvePath($path);
+
+            // 检查路径是否在 workspace 内
+            if (!$this->isPathInWorkspace($realPath, $workspaceDir)) {
+                throw new \RuntimeException("不允许删除 workspace 目录外的文件: {$path}");
+            }
+
+            // 额外保护：禁止删除 workspace 根目录本身
+            if ($realPath === rtrim($workspaceDir, '/')) {
+                throw new \RuntimeException("不允许删除 workspace 根目录");
+            }
+        }
+    }
+
+    /**
+     * 获取 workspace 目录路径
+     *
+     * @return string workspace 目录的绝对路径
+     */
+    private function getWorkspaceDir(): string
+    {
+        $workspaceDir = config('agents.workspace_dir', getcwd() . '/workspace');
+        return realpath($workspaceDir) ?: $workspaceDir;
+    }
+
+    /**
+     * 解析路径为绝对路径
+     *
+     * @param string $path 文件路径
+     * @return string 绝对路径
+     */
+    private function resolvePath(string $path): string
+    {
+        // 处理 ~ 符号
+        if (str_starts_with($path, '~/')) {
+            $home = $_SERVER['HOME'] ?? '';
+            if ($home !== '') {
+                $path = $home . substr($path, 1);
+            }
+        }
+
+        // 如果是绝对路径
+        if (str_starts_with($path, '/')) {
+            return $path;
+        }
+
+        // 相对路径，基于当前工作目录
+        $cwd = getcwd();
+        $fullPath = $cwd . '/' . $path;
+
+        // 规范化路径（处理 .. 和 .）
+        $parts = explode('/', $fullPath);
+        $resolved = [];
+
+        foreach ($parts as $part) {
+            if ($part === '.' || $part === '') {
+                continue;
+            } elseif ($part === '..') {
+                if (count($resolved) > 0) {
+                    array_pop($resolved);
+                }
+            } else {
+                $resolved[] = $part;
+            }
+        }
+
+        return '/' . implode('/', $resolved);
+    }
+
+    /**
+     * 检查路径是否在 workspace 目录内
+     *
+     * @param string $path 要检查的路径
+     * @param string $workspaceDir workspace 目录路径
+     * @return bool 如果路径在 workspace 内返回 true
+     */
+    private function isPathInWorkspace(string $path, string $workspaceDir): bool
+    {
+        // 规范化路径
+        $normalizedPath = rtrim($path, '/');
+        $normalizedWorkspace = rtrim($workspaceDir, '/');
+
+        // 检查路径是否以 workspace 目录开头
+        return str_starts_with($normalizedPath, $normalizedWorkspace . '/');
     }
 
     /**
