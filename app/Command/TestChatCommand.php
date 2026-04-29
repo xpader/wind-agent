@@ -27,7 +27,7 @@ class TestChatCommand extends Command
             ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', '')
             ->addOption('system', 's', InputOption::VALUE_OPTIONAL, '系统提示词', '')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '用户提示词', '你好，请简单介绍一下你自己')
-            ->addOption('temperature', 't', InputOption::VALUE_OPTIONAL, '温度参数 (0-2)', '0.7')
+            ->addOption('temperature', 't', InputOption::VALUE_OPTIONAL, '温度参数 (0-2)，不设置则使用 API 默认值')
             ->addOption('max-tokens', null, InputOption::VALUE_OPTIONAL, '最大 token 数', '2000')
             ->addOption('stream', null, InputOption::VALUE_NONE, '使用流式输出')
             ->addOption('think', null, InputOption::VALUE_OPTIONAL, '启用思考模式 (true/false/high/medium/low)')
@@ -80,7 +80,7 @@ class TestChatCommand extends Command
             'model' => $input->getOption('model'),
             'systemPrompt' => $input->getOption('system'),
             'prompt' => $input->getOption('prompt'),
-            'temperature' => (float) $input->getOption('temperature'),
+            'temperature' => $input->getOption('temperature') !== null ? (float) $input->getOption('temperature') : null,
             'maxTokens' => (int) $input->getOption('max-tokens'),
             'useStream' => $input->getOption('stream'),
             'think' => $input->getOption('think'),
@@ -177,8 +177,12 @@ class TestChatCommand extends Command
     {
         $request = LLMRequest::create()
             ->model($config['model'])
-            ->temperature($config['temperature'])
             ->maxTokens($config['maxTokens']);
+
+        // 只在明确设置 temperature 时才传递
+        if ($config['temperature'] !== null) {
+            $request->temperature($config['temperature']);
+        }
 
         // 添加系统提示词
         if ($config['systemPrompt']) {

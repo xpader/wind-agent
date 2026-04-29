@@ -22,9 +22,9 @@ class LLMRequest
     public array $messages = [];
 
     public string $model = 'gpt-3.5-turbo';
-    public float $temperature = 0.7;
+    public ?float $temperature = null;
     public int $maxTokens = 2000;
-    public float $topP = 1.0;
+    public ?float $topP = null;
     public $think = null;
     public array $parameters = [];
 
@@ -253,10 +253,17 @@ class LLMRequest
         $array = [
             'model' => $this->model,
             'messages' => $this->messages,
-            'temperature' => $this->temperature,
             'max_tokens' => $this->maxTokens,
-            'top_p' => $this->topP,
         ];
+
+        // 只在设置了值时才添加 temperature 和 top_p
+        if ($this->temperature !== null) {
+            $array['temperature'] = $this->temperature;
+        }
+
+        if ($this->topP !== null) {
+            $array['top_p'] = $this->topP;
+        }
 
         if ($this->think !== null) {
             $array['think'] = $this->think;

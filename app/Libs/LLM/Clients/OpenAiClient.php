@@ -71,11 +71,28 @@ class OpenAiClient implements LLMClient
      */
     public function chatStream(LLMRequest $request, callable $callback): void
     {
-        // 默认的完成判断：使用 finish_reason
-        $isDoneCallback = function(array $data): bool {
-            $choice = $data['choices'][0] ?? [];
-            return ($choice['finish_reason'] ?? null) !== null;
-        };
+        // 添加 stream_options 参数以获取 usage 信息（支持 Kimi 等兼容 API）
+        $request->parameters['stream_options'] = ['include_usage' => true];
+
+        // 完成判断：根据是否设置了 stream_options.include_usage 使用不同的策略
+        if (isset($request->parameters['stream_options']['include_usage']) &&
+            $request->parameters['stream_options']['include_usage'] === true) {
+            // 如果设置了 include_usage，使用 usage 判断完成
+            // 原因：根据 Kimi/DeepSeek 文档，流式响应的结构是：
+            // 1. 多个正常的流式 chunk（有 content，有 finish_reason，usage 为 null）
+            // 2. 最后一个特殊的 usage chunk（choices 为空数组，usage 包含完整统计）
+            // 如果用 finish_reason 判断完成，会错过最后的 usage chunk，导致无法获取 token 统计
+            // 参考 MiniMaxClient 的实现
+            $isDoneCallback = function(array $data): bool {
+                return isset($data['usage']) && $data['usage'] !== null;
+            };
+        } else {
+            // 默认的完成判断：使用 finish_reason
+            $isDoneCallback = function(array $data): bool {
+                $choice = $data['choices'][0] ?? [];
+                return ($choice['finish_reason'] ?? null) !== null;
+            };
+        }
 
         $this->sendChatStream($request, $callback, $isDoneCallback);
     }
@@ -405,10 +422,21 @@ class OpenAiClient implements LLMClient
      * 构建 OpenAI 格式的请求载荷
      * 将 tool_calls 中的 arguments 从对象格式转换为 JSON 字符串
      * 处理 DeepSeek/OpenAI 的思考模式参数
+     * 应用配置文件中的默认 temperature 和 top_p 值
      */
     private function buildOpenAiPayload(LLMRequest $request): array
     {
         $payload = $request->toArray();
+
+        // 如果请求中没有设置 temperature，从配置中读取默认值
+        if (!isset($payload['temperature']) && isset($this->defaultOptions['temperature'])) {
+            $payload['temperature'] = $this->defaultOptions['temperature'];
+        }
+
+        // 如果请求中没有设置 top_p，从配置中读取默认值
+        if (!isset($payload['top_p']) && isset($this->defaultOptions['top_p'])) {
+            $payload['top_p'] = $this->defaultOptions['top_p'];
+        }
 
         // 转换消息中的 tool_calls 格式
         if (isset($payload['messages']) && is_array($payload['messages'])) {

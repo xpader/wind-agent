@@ -32,7 +32,7 @@ class TestAgentCommand extends Command
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '系统提示词', '你是一个专业的 AI 助手，可以帮助用户解决各种问题。')
             ->addOption('message', null, InputOption::VALUE_OPTIONAL, '用户消息')
             ->addOption('max-tokens', null, InputOption::VALUE_OPTIONAL, '最大 token 数', '32768')
-            ->addOption('temperature', 't', InputOption::VALUE_OPTIONAL, '温度参数 (0-2)', '0.7')
+            ->addOption('temperature', 't', InputOption::VALUE_OPTIONAL, '温度参数 (0-2)，不设置则使用 API 默认值')
             ->addOption('stream', 's', InputOption::VALUE_NONE, '使用流式输出')
             ->addOption('interactive', 'i', InputOption::VALUE_NONE, '启用交互式多轮对话模式')
             ->addOption('think', null, InputOption::VALUE_OPTIONAL, '启用思考模式 (true/false/high/medium/low)')
@@ -202,7 +202,7 @@ class TestAgentCommand extends Command
             'systemPrompt' => $input->getOption('prompt'),
             'userMessage' => $input->getOption('message'),
             'maxTokens' => (int) $input->getOption('max-tokens'),
-            'temperature' => (float) $input->getOption('temperature'),
+            'temperature' => $input->getOption('temperature') !== null ? (float) $input->getOption('temperature') : null,
             'useStream' => $input->getOption('stream'),
             'interactive' => $input->getOption('interactive'),
             'think' => $input->getOption('think'),
@@ -522,6 +522,11 @@ class TestAgentCommand extends Command
         // DeepSeek 系列 - 100k+
         if (preg_match('/deepseek/i', $model)) {
             return 100000;
+        }
+
+        // Kimi 系列 - 256k
+        if (preg_match('/^kimi-/i', $model)) {
+            return 256000;
         }
 
         // Qwen 3.5 小参数系列 - 64k

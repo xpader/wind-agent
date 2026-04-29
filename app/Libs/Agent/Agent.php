@@ -38,7 +38,7 @@ class Agent
     private int $maxTokens;
 
     /** 温度参数 */
-    private float $temperature;
+    private ?float $temperature;
 
     /** 思考模式 */
     private $think = null;
@@ -82,7 +82,7 @@ class Agent
         string $model = 'gpt-3.5-turbo',
         ?LLMClient $provider = null,
         int $maxTokens = 32768,
-        float $temperature = 0.7,
+        ?float $temperature = null,
         $think = null,
         bool $withMcp = false
     ) {
@@ -505,7 +505,9 @@ class Agent
             $request = LLMRequest::create();
             $request->addMessages($this->messages);
             $request->model($this->model);
-            $request->temperature($this->temperature);
+            if ($this->temperature !== null) {
+                $request->temperature($this->temperature);
+            }
             $request->maxTokens($this->maxTokens);
             if ($this->think !== null) {
                 $request->think($this->think);
@@ -586,7 +588,9 @@ class Agent
 
         // 设置参数
         $request->model($this->model);
-        $request->temperature($this->temperature);
+        if ($this->temperature !== null) {
+            $request->temperature($this->temperature);
+        }
         $request->maxTokens($this->maxTokens);
 
         // 设置思考模式（使用方法调用以触发类型转换）
@@ -756,7 +760,6 @@ class Agent
 5. 只返回标题，不要任何解释或额外内容');
             $request->addUser("请为以下对话生成一个标题：\n\n" . $contentForTitle);
             $request->model($this->model);
-            $request->temperature(0.3);
             $request->maxTokens(1000);
             $request->think(false); // 关闭 Think 模式
 

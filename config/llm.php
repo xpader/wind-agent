@@ -15,6 +15,7 @@ return [
      * - api_key: API 密钥
      * - base_url: API 基础 URL
      * - version: API 版本（仅 Anthropic 兼容接口需要）
+     * - default_options: 默认请求参数（temperature, top_p 等），如果不设置则不会传递这些参数
      */
     'providers' => [
         /**
@@ -78,6 +79,20 @@ return [
             'api_key' => env('ANTHROPIC_API_KEY', ''),
             'base_url' => 'https://api.anthropic.com',
         ],
+
+        /**
+         * Kimi (月之暗面) 配置
+         */
+        'kimi' => [
+            'client' => 'openai', // 使用 OpenAI 兼容接口
+            'api_key' => env('KIMI_API_KEY', ''),
+            'base_url' => 'https://api.moonshot.cn/v1',
+            // 如果需要设置 temperature 和 top_p，取消下面的注释
+            // 'default_options' => [
+            //     'temperature' => 0.7,
+            //     'top_p' => 1.0,
+            // ],
+        ],
     ],
 
     /**
@@ -86,6 +101,5 @@ return [
     'defaults' => [
         'timeout' => 60,
         'max_tokens' => 32768,
-        'temperature' => 0.7,
     ],
 ];
