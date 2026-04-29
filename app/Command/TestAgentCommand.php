@@ -530,13 +530,13 @@ class TestAgentCommand extends Command
         }
 
         // GLM 系列
+        // glm-4.6+ 或 glm-5. 开头 - 200k（先判断，避免被 4/4.5 规则拦截）
+        if (preg_match('/^glm-4\.([6-9]|[1-9][0-9])/i', $model) || preg_match('/^glm-5(\.|$)/i', $model)) {
+            return 200000;
+        }
         // glm-4 或 glm-4.5 开头 - 128k
         if (preg_match('/^glm-4(\.5)?($|[^0-9])/i', $model)) {
             return 128000;
-        }
-        // glm-4.6+ 或 glm-5. 开头 - 200k
-        if (preg_match('/^glm-4\.([6-9]|[1-9][0-9])/i', $model) || preg_match('/^glm-5(\.|$)/i', $model)) {
-            return 200000;
         }
 
         // Qwen 3.5 小参数系列 - 64k
