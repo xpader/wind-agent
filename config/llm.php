@@ -102,6 +102,15 @@ return [
             'api_key' => env('ZHIPU_API_KEY', ''),
             'base_url' => 'https://open.bigmodel.cn/api/coding/paas/v4/',
         ],
+
+        /**
+         * 小米 MIMO Token Plan 配置
+         */
+        'mimo-token-plan' => [
+            'client' => 'openai', // 使用 OpenAI 兼容接口
+            'api_key' => env('MIMO_API_KEY', ''),
+            'base_url' => 'https://token-plan-cn.xiaomimimo.com/v1',
+        ],
     ],
 
     /**

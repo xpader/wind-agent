@@ -6,6 +6,7 @@ use App\Libs\Agent\Agent;
 use App\Libs\LLM\LLMClient;
 use App\Libs\LLM\LLMResponse;
 use App\Libs\LLM\ClientFactory;
+use App\Libs\LLM\ModelInfo;
 use App\Libs\Agent\ToolManager;
 use App\Libs\MCP\McpManager;
 use Amp\Http\Client\HttpClientBuilder;
@@ -495,57 +496,18 @@ class TestAgentCommand extends Command
         // 显示上下文 Token 使用情况
         if ($agent !== null) {
             $totalTokens = $agent->getTotalTokens();
-            $contextLength = $this->estimateContextLimit($response->model);
-            $percentage = $totalTokens > 0 && $contextLength > 0 ? round(($totalTokens / $contextLength) * 100, 1) : 0;
-            $output->writeln("<info>上下文:</info> {$totalTokens}/{$contextLength} ({$percentage}%)");
+            $contextLength = ModelInfo::estimateContextLimit($response->model);
+
+            // 如果 totalTokens 为 0，说明 API 没有返回 usage 信息（某些 API 的流式模式）
+            if ($totalTokens === 0) {
+                $output->writeln("<info>上下文:</info> N/A (API 未返回 token 信息)");
+            } else {
+                $percentage = $totalTokens > 0 && $contextLength > 0 ? round(($totalTokens / $contextLength) * 100, 1) : 0;
+                $output->writeln("<info>上下文:</info> {$totalTokens}/{$contextLength} ({$percentage}%)");
+            }
         }
 
         $output->writeln('');
-    }
-
-    /**
-     * 估算模型的上下文长度
-     * 使用启发式方法根据模型名称判断
-     */
-    private function estimateContextLimit(string $model): int
-    {
-        // Anthropic Claude 系列 - 200k
-        if (preg_match('/claude-3/i', $model)) {
-            return 200000;
-        }
-
-        // MiniMax 系列 - 200k
-        if (preg_match('/MiniMax-M2\.7/i', $model) || preg_match('/abab6/i', $model)) {
-            return 200000;
-        }
-
-        // DeepSeek 系列 - 100k+
-        if (preg_match('/deepseek/i', $model)) {
-            return 100000;
-        }
-
-        // Kimi 系列 - 256k
-        if (preg_match('/^kimi-/i', $model)) {
-            return 256000;
-        }
-
-        // GLM 系列
-        // glm-4.6+ 或 glm-5. 开头 - 200k（先判断，避免被 4/4.5 规则拦截）
-        if (preg_match('/^glm-4\.([6-9]|[1-9][0-9])/i', $model) || preg_match('/^glm-5(\.|$)/i', $model)) {
-            return 200000;
-        }
-        // glm-4 或 glm-4.5 开头 - 128k
-        if (preg_match('/^glm-4(\.5)?($|[^0-9])/i', $model)) {
-            return 128000;
-        }
-
-        // Qwen 3.5 小参数系列 - 64k
-        if (preg_match('/^qwen3\.5:(0\.8|4|9)b/i', $model)) {
-            return 64000;
-        }
-
-        // 默认值（保守估计）
-        return 32768;
     }
 
     /**
