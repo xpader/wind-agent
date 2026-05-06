@@ -48,8 +48,7 @@ class OllamaClient implements LLMClient
         $payload['stream'] = false;
 
         $response = $this->request('POST', '/api/chat', $payload);
-        $response = $this->fixUtf8Encoding($response);
-        $data = $this->safeJsonDecode($response);
+        $data = json_decode($response, true);
 
         return $this->parseChatResponse($data, $request->model);
     }
@@ -83,7 +82,7 @@ class OllamaClient implements LLMClient
         $this->processStreamByChunk(
             $response->getBody(),
             function($line) use ($callback, $request) {
-                $data = $this->safeJsonDecode($line);
+                $data = json_decode($line, true);
                 if ($data !== null) {
                     $response = $this->parseStreamChunk($data, $request->model);
                     $callback($response);
@@ -102,7 +101,7 @@ class OllamaClient implements LLMClient
     public function listModels(): array
     {
         $response = $this->request('GET', '/api/tags');
-        $data = $this->safeJsonDecode($response);
+        $data = json_decode($response, true);
         return $data['models'] ?? [];
     }
 

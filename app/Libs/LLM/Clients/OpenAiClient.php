@@ -57,7 +57,7 @@ class OpenAiClient implements LLMClient
         $payload = $this->buildOpenAiPayload($request);
 
         $response = $this->request('POST', '/chat/completions', $payload);
-        $data = $this->safeJsonDecode($response);
+        $data = json_decode($response, true);
 
         return $this->parseChatResponse($data);
     }
@@ -137,7 +137,7 @@ class OpenAiClient implements LLMClient
                 }
 
                 if (str_starts_with($line, 'data: ')) {
-                    $data = $this->safeJsonDecode(substr($line, 6));
+                    $data = json_decode(substr($line, 6), true);
                     if ($data !== null) {
                         $choice = $data['choices'][0] ?? [];
                         $delta = $choice['delta'] ?? [];
@@ -276,7 +276,7 @@ class OpenAiClient implements LLMClient
     public function listModels(): array
     {
         $response = $this->request('GET', '/models');
-        $data = $this->safeJsonDecode($response);
+        $data = json_decode($response, true);
         return $data['data'] ?? [];
     }
 

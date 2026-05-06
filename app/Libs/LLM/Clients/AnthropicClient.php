@@ -61,7 +61,7 @@ class AnthropicClient implements LLMClient
     {
         $payload = $this->buildAnthropicPayload($request);
         $response = $this->request('POST', '/v1/messages', $payload);
-        $data = $this->safeJsonDecode($response);
+        $data = json_decode($response, true);
 
         return $this->parseChatResponse($data);
     }
@@ -105,7 +105,7 @@ class AnthropicClient implements LLMClient
 
                 // Anthropic 使用事件流格式
                 if (str_starts_with($line, 'data: ')) {
-                    $data = $this->safeJsonDecode(substr($line, 6));
+                    $data = json_decode(substr($line, 6), true);
                     if ($data !== null) {
                         $eventType = $data['type'] ?? '';
 

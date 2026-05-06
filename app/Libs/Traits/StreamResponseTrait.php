@@ -90,12 +90,25 @@ trait StreamResponseTrait
     protected function processStreamByChunk($streamBody, callable $lineProcessor): void
     {
         $buffer = '';
+        $incompleteBytes = '';  // 保存不完整的字节
 
         while (($chunk = $streamBody->read()) !== null && $chunk !== '') {
-            // UTF-8 编码处理（使用 //IGNORE 忽略不完整的多字节字符）
-            // 注意：这可能会导致少量字符丢失，但可以避免 PHP Notice
-            // TODO: 实现更完善的 UTF-8 流式处理（参考 docs/utf8-stream-issue.md）
-            $chunk = iconv('UTF-8', 'UTF-8//IGNORE', $chunk);
+            // 将之前保存的不完整字节与当前 chunk 拼接
+            if ($incompleteBytes !== '') {
+                $chunk = $incompleteBytes . $chunk;
+                $incompleteBytes = '';
+            }
+
+            // 检查并处理末尾可能不完整的 UTF-8 字符
+            // 在流式响应中，多字节字符（如中文）可能被拆分到两个 chunk 中
+            // 例如：一个 3 字节的中文可能被拆成 1+2 或 2+1 的形式
+            $incompleteCount = $this->detectIncompleteUtf8($chunk);
+            if ($incompleteCount > 0) {
+                // 将不完整的字节保存到下一次处理
+                $incompleteBytes = substr($chunk, -$incompleteCount);
+                $chunk = substr($chunk, 0, -$incompleteCount);
+            }
+
             $buffer .= $chunk;
 
             // 按行分割，保留最后一个可能不完整的行
@@ -113,6 +126,11 @@ trait StreamResponseTrait
             }
         }
 
+        // 处理最后剩余的不完整字节（如果有）
+        if ($incompleteBytes !== '') {
+            $buffer .= $incompleteBytes;
+        }
+
         // 处理最后一行（即使没有换行符）
         if ($buffer !== '') {
             $lineProcessor($buffer);
@@ -120,26 +138,68 @@ trait StreamResponseTrait
     }
 
     /**
-     * 修复 UTF-8 编码问题
+     * 检测字符串末尾不完整的 UTF-8 字符的字节数
      *
-     * @param string $data 原始数据
-     * @return string 修复后的数据
+     * UTF-8 编码规则：
+     * - 0xxxxxxx: 1字节 (ASCII)
+     * - 110xxxxx: 2字节字符的开始
+     * - 1110xxxx: 3字节字符的开始
+     * - 11110xxx: 4字节字符的开始
+     * - 10xxxxxx: 多字节字符的后续字节
+     *
+     * @param string $data 输入字符串
+     * @return int 不完整的字节数，0 表示完整
      */
-    protected function fixUtf8Encoding(string $data): string
+    protected function detectIncompleteUtf8(string $data): int
     {
-        return iconv('UTF-8', 'UTF-8//TRANSLIT', $data);
-    }
+        $len = strlen($data);
+        if ($len === 0) {
+            return 0;
+        }
 
-    /**
-     * 安全解析 JSON
-     *
-     * @param string $json JSON 字符串
-     * @return array|null 解析后的数组，失败返回 null
-     */
-    protected function safeJsonDecode(string $json): ?array
-    {
-        $data = json_decode($json, true);
-        return json_last_error() === JSON_ERROR_NONE ? $data : null;
+        $incompleteBytes = 0;
+
+        // 只检查末尾最多 3 个字节（UTF-8 最多 4 字节，去掉首字节）
+        $maxCheck = min(3, $len);
+        for ($i = 0; $i < $maxCheck; $i++) {
+            $byte = ord($data[$len - 1 - $i]);
+
+            // 10xxxxxx: 多字节字符的后续字节
+            if (($byte & 0xC0) === 0x80) {
+                $incompleteBytes++;
+            } else {
+                // 找到非后续字节，这是可能的开始字节位置
+                $startIndex = $len - 1 - $i;
+
+                // 判断开始字节对应的字符总字节数
+                if (($byte & 0x80) === 0x00) {
+                    // ASCII 字符，不可能是多字节字符
+                    return 0;
+                } elseif (($byte & 0xE0) === 0xC0) {
+                    $expectedBytes = 2;  // 110xxxxx: 2字节
+                } elseif (($byte & 0xF0) === 0xE0) {
+                    $expectedBytes = 3;  // 1110xxxx: 3字节
+                } elseif (($byte & 0xF8) === 0xF0) {
+                    $expectedBytes = 4;  // 11110xxx: 4字节
+                } else {
+                    // 无效的 UTF-8 开始字节
+                    return 0;
+                }
+
+                // 当前字符的总字节数 = 1（开始字节）+ 后续字节数
+                $currentCharBytes = 1 + $incompleteBytes;
+
+                // 如果当前字符不完整（字节数少于期望值）
+                if ($currentCharBytes < $expectedBytes) {
+                    return $currentCharBytes;
+                }
+
+                return 0;  // 字符完整
+            }
+        }
+
+        // 整个字符串都是后续字节，全部不完整
+        return $incompleteBytes;
     }
 
     /**
