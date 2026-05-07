@@ -77,9 +77,17 @@ class TestChatCommand extends Command
      */
     private function parseConfig(InputInterface $input): array
     {
+        $clientType = $input->getOption('client');
+        $model = $input->getOption('model');
+
+        // 如果没有指定模型，使用 provider 的默认模型
+        if ($model === '') {
+            $model = config("llm.providers.{$clientType}.default_model", '');
+        }
+
         return [
-            'clientType' => $input->getOption('client'),
-            'model' => $input->getOption('model'),
+            'clientType' => $clientType,
+            'model' => $model,
             'systemPrompt' => $input->getOption('system'),
             'prompt' => $input->getOption('prompt'),
             'temperature' => $input->getOption('temperature') !== null ? (float) $input->getOption('temperature') : null,

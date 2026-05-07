@@ -27,7 +27,7 @@ class McpManager
     private static string $cacheFile = '';
 
     /** @var int 缓存有效期（秒） */
-    private static int $cacheTtl = 7200; // 2 小时
+    private static int $cacheTtl = 21600; // 6 小时
 
     /**
      * 获取缓存文件路径

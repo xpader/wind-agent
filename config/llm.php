@@ -24,6 +24,7 @@ return [
         'ollama' => [
             'client' => \App\Libs\LLM\Clients\OllamaClient::class,
             'base_url' => 'http://localhost:11434',
+            'default_model' => 'qwen3.5:4b',
         ],
 
         /**
@@ -33,6 +34,7 @@ return [
             'client' => 'openai', // 等同于 \App\Libs\LLM\Clients\OpenAiClient::class
             'api_key' => env('OPENAI_API_KEY', ''),
             'base_url' => 'https://api.openai.com/v1',
+            'default_model' => 'gpt-4o-mini',
         ],
 
         /**
@@ -42,6 +44,7 @@ return [
             'client' => 'anthropic', // 等同于 \App\Libs\LLM\Clients\AnthropicClient::class
             'api_key' => env('MINIMAX_API_KEY', ''),
             'base_url' => 'https://api.minimaxi.com/anthropic',
+            'default_model' => 'MiniMax-M2.7-highspeed',
         ],
 
         /**
@@ -51,6 +54,7 @@ return [
             'client' => \App\Libs\LLM\Clients\MiniMaxClient::class,
             'api_key' => env('MINIMAX_API_KEY', ''),
             'base_url' => 'https://api.minimaxi.com/v1',
+            'default_model' => 'MiniMax-M2.7-highspeed',
         ],
 
         /**
@@ -60,6 +64,7 @@ return [
             'client' => 'openai', // 使用 OpenAI 兼容接口
             'api_key' => env('DEEPSEEK_API_KEY', ''),
             'base_url' => 'https://api.deepseek.com',
+            'default_model' => 'deepseek-v4-flash',
         ],
 
         /**
@@ -69,6 +74,7 @@ return [
             'client' => 'anthropic', // 使用 Anthropic 兼容接口
             'api_key' => env('DEEPSEEK_API_KEY', ''),
             'base_url' => 'https://api.deepseek.com/anthropic',
+            'default_model' => 'deepseek-v4-flash',
         ],
 
         /**
@@ -87,6 +93,7 @@ return [
             'client' => 'openai', // 使用 OpenAI 兼容接口
             'api_key' => env('KIMI_API_KEY', ''),
             'base_url' => 'https://api.moonshot.cn/v1',
+            'default_model' => 'kimi-k2.6',
             // 如果需要设置 temperature 和 top_p，取消下面的注释
             // 'default_options' => [
             //     'temperature' => 0.7,
@@ -101,6 +108,7 @@ return [
             'client' => 'openai', // 使用 OpenAI 兼容接口
             'api_key' => env('ZHIPU_API_KEY', ''),
             'base_url' => 'https://open.bigmodel.cn/api/coding/paas/v4/',
+            'default_model' => 'glm-4.7',
         ],
 
         /**
@@ -110,6 +118,7 @@ return [
             'client' => 'openai', // 使用 OpenAI 兼容接口
             'api_key' => env('MIMO_API_KEY', ''),
             'base_url' => 'https://token-plan-cn.xiaomimimo.com/v1',
+            'default_model' => 'mimo-v2.5',
         ],
 
         /**
@@ -119,6 +128,7 @@ return [
             'client' => 'openai', // 使用 OpenAI 兼容接口
             'api_key' => env('SENSENOVA_API_KEY', ''),
             'base_url' => 'https://token.sensenova.cn/v1',
+            'default_model' => 'sensenova-6.7-flash-lite',
         ],
     ],
 
