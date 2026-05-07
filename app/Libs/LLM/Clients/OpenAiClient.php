@@ -137,7 +137,8 @@ class OpenAiClient implements LLMClient
                 }
 
                 if (str_starts_with($line, 'data: ')) {
-                    $data = json_decode(substr($line, 6), true);
+                    $jsonStr = substr($line, 6);
+                    $data = json_decode($jsonStr, true);
                     if ($data !== null) {
                         $choice = $data['choices'][0] ?? [];
                         $delta = $choice['delta'] ?? [];
@@ -177,14 +178,14 @@ class OpenAiClient implements LLMClient
                                 }
 
                                 // 合并字段
-                                if (isset($toolCall['id'])) {
+                                if (!empty($toolCall['id'])) {
                                     $accumulatedToolCalls[$index]['id'] = $toolCall['id'];
                                 }
-                                if (isset($toolCall['type'])) {
+                                if (!empty($toolCall['type'])) {
                                     $accumulatedToolCalls[$index]['type'] = $toolCall['type'];
                                 }
                                 if (isset($toolCall['function'])) {
-                                    if (isset($toolCall['function']['name'])) {
+                                    if (!empty($toolCall['function']['name'])) {
                                         $accumulatedToolCalls[$index]['function']['name'] = $toolCall['function']['name'];
                                     }
                                     if (isset($toolCall['function']['arguments'])) {

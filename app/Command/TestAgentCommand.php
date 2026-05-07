@@ -25,10 +25,13 @@ class TestAgentCommand extends Command
 {
     protected function configure()
     {
+        // 动态获取支持的 provider 列表
+        $providers = \App\Libs\LLM\ClientFactory::getSupportedProviders();
+        $providerList = implode('/', $providers);
+
         $this->setName('test:agent')
             ->setDescription('测试 Agent 类功能')
-            ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek/anthropic/minimax-anthropic/deepseek-anthropic)', 'ollama')
-            ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '')
+            ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, "客户端类型 ({$providerList})", 'ollama')
             ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', '')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '系统提示词', '你是一个专业的 AI 助手，可以帮助用户解决各种问题。')
             ->addOption('message', null, InputOption::VALUE_OPTIONAL, '用户消息')
@@ -52,7 +55,7 @@ class TestAgentCommand extends Command
         $config = $this->parseConfig($input);
 
         // 创建客户端
-        $client = $this->createClient($config['clientType'], $config['host']);
+        $client = $this->createClient($config['clientType']);
 
         // 准备工具
         $tools = $config['withTools'] ? ToolManager::getAll() : [];
@@ -198,7 +201,6 @@ class TestAgentCommand extends Command
     {
         return [
             'clientType' => $input->getOption('client'),
-            'host' => $input->getOption('host'),
             'model' => $input->getOption('model'),
             'systemPrompt' => $input->getOption('prompt'),
             'userMessage' => $input->getOption('message'),
@@ -220,16 +222,11 @@ class TestAgentCommand extends Command
     /**
      * 创建客户端
      */
-    private function createClient(string $type, string $host): LLMClient
+    private function createClient(string $type): LLMClient
     {
         $httpClient = HttpClientBuilder::buildDefault();
 
         $options = ['timeout' => 60];
-
-        // 只有 ollama 才设置 base_url
-        if ($type === 'ollama') {
-            $options['base_url'] = $host !== '' ? $host : 'http://172.19.208.203:11434';
-        }
 
         return ClientFactory::create($type, '', $httpClient, $options);
     }
@@ -239,18 +236,8 @@ class TestAgentCommand extends Command
      */
     private function displayHeader(OutputInterface $output, array $config): void
     {
-        $clientNames = [
-            'openai' => 'OpenAI 兼容客户端',
-            'minimax' => 'MiniMax TokenPlan 客户端',
-            'minimax-anthropic' => 'MiniMax Anthropic 兼容客户端',
-            'deepseek' => 'DeepSeek 客户端',
-            'deepseek-anthropic' => 'DeepSeek Anthropic 兼容客户端',
-            'ollama' => 'Ollama 原生客户端',
-            'anthropic' => 'Anthropic Claude 客户端',
-            'claude' => 'Anthropic Claude 客户端'
-        ];
-
-        $clientName = $clientNames[$config['clientType']] ?? '未知客户端';
+        // 动态获取客户端显示名称
+        $clientName = $this->getClientDisplayName($config['clientType']);
 
         $output->writeln('');
         $output->writeln('<fg=blue;options=bold>========================================</>');
@@ -258,7 +245,6 @@ class TestAgentCommand extends Command
         $output->writeln('<fg=blue;options=bold>========================================</>');
         $output->writeln('');
         $output->writeln("<info>客户端类型:</info> {$clientName}");
-        $output->writeln("<info>服务地址:</info> {$config['host']}");
         $output->writeln("<info>模型名称:</info> {$config['model']}");
         $output->writeln("<info>系统提示词文件:</info> AGENTS.md, MEMORY.md");
         $output->writeln("<info>用户消息:</info> {$config['userMessage']}");
@@ -778,5 +764,22 @@ class TestAgentCommand extends Command
 
         // 否则直接当作会话 ID 返回
         return $input;
+    }
+
+    /**
+     * 获取客户端的显示名称
+     *
+     * @param string $provider Provider 名称
+     * @return string 客户端显示名称
+     */
+    private function getClientDisplayName(string $provider): string
+    {
+        $providerConfig = config("llm.providers.{$provider}");
+        if ($providerConfig === null) {
+            return "{$provider} (未知客户端)";
+        }
+
+        $clientType = $providerConfig['client'] ?? 'unknown';
+        return "{$provider} (客户端类型: {$clientType})";
     }
 }

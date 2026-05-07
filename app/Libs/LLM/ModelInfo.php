@@ -38,6 +38,11 @@ class ModelInfo
             return 200000;
         }
 
+        // SenseNova 系列 - 256k
+        if (preg_match('/sensenova/i', $model)) {
+            return 256000;
+        }
+
         // GLM 系列
         // glm-4.6+ 或 glm-5. 开头 - 200k（先判断，避免被 4/4.5 规则拦截）
         if (preg_match('/^glm-4\.([6-9]|[1-9][0-9])/i', $model) || preg_match('/^glm-5(\.|$)/i', $model)) {

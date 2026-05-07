@@ -36,21 +36,21 @@ return [
         ],
 
         /**
-         * MiniMax TokenPlan 配置
+         * MiniMax Anthropic 兼容接口配置（默认）
          */
         'minimax' => [
-            'client' => \App\Libs\LLM\Clients\MiniMaxClient::class,
-            'api_key' => env('MINIMAX_API_KEY', ''),
-            'base_url' => 'https://api.minimaxi.com/v1',
-        ],
-
-        /**
-         * MiniMax Anthropic 兼容接口配置
-         */
-        'minimax-anthropic' => [
             'client' => 'anthropic', // 等同于 \App\Libs\LLM\Clients\AnthropicClient::class
             'api_key' => env('MINIMAX_API_KEY', ''),
             'base_url' => 'https://api.minimaxi.com/anthropic',
+        ],
+
+        /**
+         * MiniMax OpenAI 兼容接口配置
+         */
+        'minimax-openai' => [
+            'client' => \App\Libs\LLM\Clients\MiniMaxClient::class,
+            'api_key' => env('MINIMAX_API_KEY', ''),
+            'base_url' => 'https://api.minimaxi.com/v1',
         ],
 
         /**
@@ -110,6 +110,15 @@ return [
             'client' => 'openai', // 使用 OpenAI 兼容接口
             'api_key' => env('MIMO_API_KEY', ''),
             'base_url' => 'https://token-plan-cn.xiaomimimo.com/v1',
+        ],
+
+        /**
+         * 商汤 SenseNova 配置
+         */
+        'sensenova' => [
+            'client' => 'openai', // 使用 OpenAI 兼容接口
+            'api_key' => env('SENSENOVA_API_KEY', ''),
+            'base_url' => 'https://token.sensenova.cn/v1',
         ],
     ],
 

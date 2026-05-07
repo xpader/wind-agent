@@ -20,10 +20,13 @@ class TestChatCommand extends Command
 {
     protected function configure()
     {
+        // 动态获取支持的 provider 列表
+        $providers = \App\Libs\LLM\ClientFactory::getSupportedProviders();
+        $providerList = implode('/', $providers);
+
         $this->setName('test:chat')
             ->setDescription('聊天测试命令（支持多种 LLM 平台）')
-            ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, '客户端类型 (openai/ollama/minimax/deepseek/anthropic/claude)', 'ollama')
-            ->addOption('host', 'H', InputOption::VALUE_OPTIONAL, '服务地址', '')
+            ->addOption('client', 'c', InputOption::VALUE_OPTIONAL, "客户端类型 ({$providerList})", 'ollama')
             ->addOption('model', 'm', InputOption::VALUE_OPTIONAL, '模型名称', '')
             ->addOption('system', 's', InputOption::VALUE_OPTIONAL, '系统提示词', '')
             ->addOption('prompt', 'p', InputOption::VALUE_OPTIONAL, '用户提示词', '你好，请简单介绍一下你自己')
@@ -40,7 +43,7 @@ class TestChatCommand extends Command
         $config = $this->parseConfig($input);
 
         // 创建客户端
-        $client = $this->createClient($config['clientType'], $config['host']);
+        $client = $this->createClient($config['clientType']);
 
         // 显示标题和配置信息
         $this->displayHeader($output, $config);
@@ -76,7 +79,6 @@ class TestChatCommand extends Command
     {
         return [
             'clientType' => $input->getOption('client'),
-            'host' => $input->getOption('host'),
             'model' => $input->getOption('model'),
             'systemPrompt' => $input->getOption('system'),
             'prompt' => $input->getOption('prompt'),
@@ -91,16 +93,11 @@ class TestChatCommand extends Command
     /**
      * 创建客户端
      */
-    private function createClient(string $type, string $host): LLMClient
+    private function createClient(string $type): LLMClient
     {
         $httpClient = HttpClientBuilder::buildDefault();
 
         $options = ['timeout' => 60];
-
-        // 只有 ollama 才设置 base_url
-        if ($type === 'ollama') {
-            $options['base_url'] = $host !== '' ? $host : 'http://172.19.208.203:11434';
-        }
 
         return ClientFactory::create($type, '', $httpClient, $options);
     }
@@ -110,18 +107,8 @@ class TestChatCommand extends Command
      */
     private function displayHeader(OutputInterface $output, array $config): void
     {
-        $clientNames = [
-            'openai' => 'OpenAI 兼容客户端',
-            'minimax' => 'MiniMax TokenPlan 客户端',
-            'minimax-anthropic' => 'MiniMax Anthropic 兼容客户端',
-            'deepseek' => 'DeepSeek 客户端',
-            'deepseek-anthropic' => 'DeepSeek Anthropic 兼容客户端',
-            'ollama' => 'Ollama 原生客户端',
-            'anthropic' => 'Anthropic Claude 客户端',
-            'claude' => 'Anthropic Claude 客户端'
-        ];
-
-        $clientName = $clientNames[$config['clientType']] ?? '未知客户端';
+        // 动态获取客户端显示名称
+        $clientName = $this->getClientDisplayName($config['clientType']);
 
         $output->writeln('');
         $output->writeln('<fg=blue;options=bold>========================================</>');
@@ -129,7 +116,6 @@ class TestChatCommand extends Command
         $output->writeln('<fg=blue;options=bold>========================================</>');
         $output->writeln('');
         $output->writeln("<info>客户端类型:</info> {$clientName}");
-        $output->writeln("<info>服务地址:</info> {$config['host']}");
         $output->writeln("<info>模型名称:</info> {$config['model']}");
         if ($config['systemPrompt']) {
             $output->writeln("<info>系统提示词:</info> {$config['systemPrompt']}");
@@ -380,5 +366,22 @@ class TestChatCommand extends Command
         $output->writeln('  2. 主机地址和端口是否正确');
         $output->writeln('  3. 模型名称是否正确');
         $output->writeln('  4. 网络连接是否正常');
+    }
+
+    /**
+     * 获取客户端的显示名称
+     *
+     * @param string $provider Provider 名称
+     * @return string 客户端显示名称
+     */
+    private function getClientDisplayName(string $provider): string
+    {
+        $providerConfig = config("llm.providers.{$provider}");
+        if ($providerConfig === null) {
+            return "{$provider} (未知客户端)";
+        }
+
+        $clientType = $providerConfig['client'] ?? 'unknown';
+        return "{$provider} (客户端类型: {$clientType})";
     }
 }

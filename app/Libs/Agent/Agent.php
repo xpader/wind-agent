@@ -348,7 +348,8 @@ class Agent
             $totalToolCalls += $currentToolCallCount;
 
             // 将 assistant 消息添加到请求中（确保 MiniMax 等平台能找到对应的 tool_call_id）
-            $request->addMessage('assistant', $response->content, ['tool_calls' => $response->toolCalls]);
+            // 直接使用已经创建好的完整 assistant 消息
+            $request->messages[] = $assistantMessage;
 
             // 添加工具消息到请求和消息历史
             foreach ($toolResults as $result) {
